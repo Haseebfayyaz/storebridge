@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "database": ["libs/database/src/index.ts"],
+      "common": ["libs/common/src/index.ts"],
+      "auth": ["libs/auth/src/index.ts"],
+      "config": ["libs/config/src/index.ts"],
+      "models": ["libs/models/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "tmp"]
+}

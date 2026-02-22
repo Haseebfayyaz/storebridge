@@ -1,17 +1,24 @@
 {
   "name": "store-api-e2e",
-  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "implicitDependencies": ["store-api"],
+  "implicitDependencies": [
+    "store-api"
+  ],
   "targets": {
     "e2e": {
       "executor": "@nx/jest:jest",
-      "outputs": ["{workspaceRoot}/coverage/{e2eProjectRoot}"],
+      "outputs": [
+        "{workspaceRoot}/coverage/{e2eProjectRoot}"
+      ],
       "options": {
-        "jestConfig": "store-api-e2e/jest.config.ts",
+        "jestConfig": "apps/store-api-e2e/jest.config.ts",
         "passWithNoTests": true
       },
-      "dependsOn": ["store-api:build", "store-api:serve"]
+      "dependsOn": [
+        "store-api:build",
+        "store-api:serve"
+      ]
     }
   }
 }

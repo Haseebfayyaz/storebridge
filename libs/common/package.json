@@ -1,0 +1,11 @@
+{
+  "name": "common",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "dependencies": {
+    "@swc/helpers": "~0.5.18"
+  }
+}
