@@ -26,5 +26,12 @@
       },
       "exclude": ["api-e2e/**/*", "admin-api-e2e/**/*", "store-api-e2e/**/*"]
     }
-  ]
+  ],
+  "targetDefaults": {
+    "@nx/js:swc": {
+      "cache": true,
+      "dependsOn": ["^build"],
+      "inputs": ["default", "^default"]
+    }
+  }
 }

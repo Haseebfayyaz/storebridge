@@ -16,6 +16,11 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "noFallthroughCasesInSwitch": false
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "common": ["common/src/index.ts"],
+      "database": ["database/src/index.ts"],
+      "events": ["events/src/index.ts"]
+    }
   }
 }
