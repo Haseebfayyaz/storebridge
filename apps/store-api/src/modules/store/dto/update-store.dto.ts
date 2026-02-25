@@ -9,5 +9,5 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsString()
   @Length(1, 191)
-  ownerId?: string;
+  tenantId?: string;
 }

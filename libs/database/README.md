@@ -1,11 +1,23 @@
 # database
 
-This library was generated with [Nx](https://nx.dev).
+Shared Prisma and database module for ShopBridge.
 
-## Building
+## Prisma Schema
 
-Run `nx build database` to build the library.
+Schema path:
 
-## Running unit tests
+- `libs/database/prisma/schema.prisma`
 
-Run `nx test database` to execute the unit tests via [Jest](https://jestjs.io).
+## Migration Guide
+
+See:
+
+- `libs/database/MIGRATIONS.md`
+
+## Quick Commands
+
+- `npm run prisma:format`
+- `npm run prisma:validate`
+- `npm run prisma:generate`
+- `npm run prisma:migrate -- --name <migration_name>`
+- `npm run prisma:migrate:deploy`

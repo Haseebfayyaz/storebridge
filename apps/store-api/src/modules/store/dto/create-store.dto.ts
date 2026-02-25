@@ -7,5 +7,17 @@ export class CreateStoreDto {
 
   @IsString()
   @Length(1, 191)
-  ownerId!: string;
+  tenantId!: string;
+
+  @IsString()
+  @Length(2, 100)
+  city!: string;
+
+  @IsString()
+  @Length(2, 100)
+  country!: string;
+
+  @IsString()
+  @Length(2, 100)
+  timezone!: string;
 }

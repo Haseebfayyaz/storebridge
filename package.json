@@ -14,8 +14,15 @@
     "nx:build:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build api",
     "nx:build:admin-api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build admin-api",
     "nx:build:store-api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build store-api",
+    "prisma:format": "prisma format --schema=libs/database/prisma/schema.prisma",
+    "prisma:validate": "prisma validate --schema=libs/database/prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema=libs/database/prisma/schema.prisma",
-    "prisma:migrate": "prisma migrate dev --schema=libs/database/prisma/schema.prisma"
+    "prisma:migrate": "prisma migrate dev --schema=libs/database/prisma/schema.prisma",
+    "prisma:migrate:create": "prisma migrate dev --create-only --schema=libs/database/prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema=libs/database/prisma/schema.prisma",
+    "prisma:migrate:status": "prisma migrate status --schema=libs/database/prisma/schema.prisma",
+    "prisma:migrate:reset": "prisma migrate reset --schema=libs/database/prisma/schema.prisma",
+    "prisma:studio": "prisma studio --schema=libs/database/prisma/schema.prisma"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

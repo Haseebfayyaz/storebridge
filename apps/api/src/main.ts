@@ -16,6 +16,10 @@ async function bootstrap() {
     }),
   );
   app.useGlobalFilters(new HttpExceptionFilter());
+  app.enableCors({
+    origin: ['http://localhost:8000', 'http://localhost:8002'],
+    credentials: true,
+  });
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 3000);

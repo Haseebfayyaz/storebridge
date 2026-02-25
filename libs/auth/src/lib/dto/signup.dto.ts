@@ -1,14 +1,6 @@
-import { IsEmail, IsEnum, IsString, MinLength } from 'class-validator';
-import { AppRole } from 'models';
+import { CustomerSignupDto } from './customer-signup.dto';
 
-export class SignupDto {
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  @MinLength(8)
-  password!: string;
-
-  @IsEnum(AppRole)
-  role!: AppRole;
-}
+/**
+ * @deprecated Use CustomerSignupDto or VendorSignupDto.
+ */
+export class SignupDto extends CustomerSignupDto {}

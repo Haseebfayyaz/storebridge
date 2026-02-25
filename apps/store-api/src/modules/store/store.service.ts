@@ -11,7 +11,10 @@ export class StoreService {
     return this.prisma.store.create({
       data: {
         name: dto.name,
-        ownerId: dto.ownerId,
+        tenantId: dto.tenantId,
+        city: dto.city,
+        country: dto.country,
+        timezone: dto.timezone,
       },
     });
   }
@@ -37,7 +40,7 @@ export class StoreService {
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.ownerId !== undefined ? { ownerId: dto.ownerId } : {}),
+        ...(dto.tenantId !== undefined ? { tenantId: dto.tenantId } : {}),
       },
     });
   }

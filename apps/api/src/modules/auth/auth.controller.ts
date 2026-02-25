@@ -1,5 +1,11 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
-import { AuthService, JwtAuthGuard, LoginDto, SignupDto } from 'auth';
+import {
+  AuthService,
+  CustomerSignupDto,
+  JwtAuthGuard,
+  LoginDto,
+  VendorSignupDto,
+} from 'auth';
 import { Request } from 'express';
 
 interface RequestWithUser extends Request {
@@ -12,9 +18,14 @@ interface RequestWithUser extends Request {
 export class AppAuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('signup')
-  signup(@Body() dto: SignupDto) {
-    return this.authService.signup(dto);
+  @Post('signup/customer')
+  signupCustomer(@Body() dto: CustomerSignupDto) {
+    return this.authService.signupCustomer(dto);
+  }
+
+  @Post('signup/vendor')
+  signupVendor(@Body() dto: VendorSignupDto) {
+    return this.authService.signupVendor(dto);
   }
 
   @Post('login')

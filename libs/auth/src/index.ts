@@ -6,3 +6,5 @@ export * from './lib/guards/roles.guard';
 export * from './lib/decorators/roles.decorator';
 export * from './lib/dto/login.dto';
 export * from './lib/dto/signup.dto';
+export * from './lib/dto/customer-signup.dto';
+export * from './lib/dto/vendor-signup.dto';

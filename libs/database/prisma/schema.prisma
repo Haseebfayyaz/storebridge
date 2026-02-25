@@ -7,45 +7,465 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum AppRole {
+//////////////////////
+// ENUMS
+//////////////////////
+
+enum UserRole {
+  CUSTOMER
+  VENDOR_ADMIN
+  STORE_MANAGER
+  DELIVERY
   ADMIN
-  STORE
-  USER
+  SUB_ADMIN
 }
 
 enum OrderStatus {
-  PENDING
+  ORDER_PLACED
+  ACCEPTED
   PROCESSING
-  COMPLETED
+  SHIPPED
+  DELIVERED
   CANCELLED
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  role      AppRole
-  createdAt DateTime @default(now())
-
-  stores    Store[]  @relation("StoreOwner")
-  orders    Order[]
+enum PaymentMethod {
+  COD
+  STRIPE
+  WALLET
 }
 
-model Store {
-  id        String   @id @default(cuid())
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  PICKED
+  DELIVERED
+  CANCELLED
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  REFUND
+  COMMISSION
+}
+
+//////////////////////
+// USER & AUTH
+//////////////////////
+
+model User {
+  id         String    @id
+  name       String
+  email      String    @unique
+  mobile     String?   @unique
+  password   String?
+  image      String?
+  isBlocked  Boolean   @default(false)
+  isVerified Boolean   @default(false)
+  isDeleted  Boolean   @default(false)
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  wallet     Wallet?
+  addresses  Address[]
+  ratings    Rating[]
+  orders     Order[]    @relation("BuyerRelation")
+  deliveries Delivery[]
+
+  tenant       Tenant?
+  managedStore Store?  @relation(fields: [storeId], references: [id])
+
+  roles        UserRoleAssignment[] // NEW
+  storeId      String?
+  parentOrders ParentOrder[]
+  auditLogs    AuditLog[]
+}
+
+//////////////////////
+// TENANT
+//////////////////////
+
+model Tenant {
+  id        String    @id @default(cuid())
   name      String
-  ownerId   String
-  owner     User     @relation("StoreOwner", fields: [ownerId], references: [id])
-  orders    Order[]
+  country   String
+  currency  String
+  isActive  Boolean   @default(true)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  ownerId String @unique
+  owner   User   @relation(fields: [ownerId], references: [id])
+
+  stores              Store[]
+  products            Product[]
+  warehouses          Warehouse[]
+  roles               Role[]
+  userRoleAssignments UserRoleAssignment[]
+}
+
+//////////////////////
+// STORES (BRANCHES)
+//////////////////////
+
+model Store {
+  id        String    @id @default(cuid())
+  tenantId  String    @map("tenant_id")
+  name      String
+  city      String
+  country   String
+  timezone  String
+  latitude  Float?
+  longitude Float?
+  isActive  Boolean   @default(true)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  inventories         Inventory[]
+  orders              Order[]
+  managers            User[]
+  commissions         Commission[]
+  settlements         Settlement[]
+  roles               Role[]
+  userRoleAssignments UserRoleAssignment[]
+
+  @@index([tenantId])
+}
+
+//////////////////////
+// PRODUCT CATALOG (SHARED PER VENDOR)
+//////////////////////
+
+model Product {
+  id          String    @id @default(cuid())
+  tenantId    String    @map("tenant_id")
+  name        String
+  description String
+  category    String
+  isActive    Boolean   @default(true)
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  variants ProductVariant[]
+  ratings  Rating[]
+
+  @@index([tenantId])
+}
+
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  sku       String   @unique
+  size      String?
+  weight    String?
+  price     Float
+  mrp       Float?
+  createdAt DateTime @default(now())
+
+  product              Product              @relation(fields: [productId], references: [id])
+  inventories          Inventory[]
+  orderItems           OrderItem[]
+  warehouseInventories WarehouseInventory[]
+
+  @@index([productId])
+}
+
+//////////////////////
+// INVENTORY PER STORE
+//////////////////////
+
+model Inventory {
+  id          String   @id @default(cuid())
+  storeId     String
+  variantId   String
+  stockQty    Int
+  reservedQty Int      @default(0)
+  lowStock    Int      @default(5)
+  updatedAt   DateTime @updatedAt
+
+  store   Store          @relation(fields: [storeId], references: [id])
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([storeId, variantId])
+  @@index([storeId])
+}
+
+//////////////////////
+// WAREHOUSE (OPTIONAL)
+//////////////////////
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  country   String
+  createdAt DateTime @default(now())
+
+  tenant    Tenant               @relation(fields: [tenantId], references: [id])
+  inventory WarehouseInventory[]
+}
+
+model WarehouseInventory {
+  id          String @id @default(cuid())
+  warehouseId String
+  variantId   String
+  stockQty    Int
+
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([warehouseId, variantId])
+}
+
+//////////////////////
+// ORDERS
+//////////////////////
+
+model ParentOrder {
+  id        String   @id @default(cuid())
+  userId    String
+  total     Float
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id])
+  orders Order[]
 }
 
 model Order {
-  id        String      @id @default(cuid())
-  userId    String
-  storeId   String
-  status    OrderStatus @default(PENDING)
-  createdAt DateTime    @default(now())
+  id            String        @id @default(cuid())
+  parentOrderId String?
+  userId        String
+  storeId       String
+  total         Float
+  status        OrderStatus   @default(ORDER_PLACED)
+  paymentMethod PaymentMethod
+  isPaid        Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  user      User        @relation(fields: [userId], references: [id])
-  store     Store       @relation(fields: [storeId], references: [id])
+  parentOrder ParentOrder? @relation(fields: [parentOrderId], references: [id])
+  user        User         @relation("BuyerRelation", fields: [userId], references: [id])
+  store       Store        @relation(fields: [storeId], references: [id])
+  items       OrderItem[]
+  delivery    Delivery?
+  commission  Commission?
+
+  @@index([storeId])
+  @@index([userId])
+}
+
+model OrderItem {
+  orderId   String
+  variantId String
+  quantity  Int
+  price     Float
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@id([orderId, variantId])
+}
+
+//////////////////////
+// DELIVERY
+//////////////////////
+
+model Delivery {
+  id          String         @id @default(cuid())
+  orderId     String         @unique
+  riderId     String
+  status      DeliveryStatus @default(PENDING)
+  pickupTime  DateTime?
+  deliveredAt DateTime?
+  latitude    Float?
+  longitude   Float?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  rider User  @relation(fields: [riderId], references: [id])
+}
+
+//////////////////////
+// WALLET SYSTEM
+//////////////////////
+
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Float    @default(0)
+  createdAt DateTime @default(now())
+
+  user         User                @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id        String          @id @default(cuid())
+  walletId  String
+  type      TransactionType
+  amount    Float
+  reference String?
+  createdAt DateTime        @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+}
+
+//////////////////////
+// COMMISSION & SETTLEMENT
+//////////////////////
+
+model Commission {
+  id        String   @id @default(cuid())
+  orderId   String   @unique
+  storeId   String
+  amount    Float
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id])
+}
+
+model Settlement {
+  id          String    @id @default(cuid())
+  storeId     String
+  totalAmount Float
+  isPaid      Boolean   @default(false)
+  paidAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  store Store @relation(fields: [storeId], references: [id])
+}
+
+//////////////////////
+// COUPONS
+//////////////////////
+
+model Coupon {
+  code        String   @id
+  description String
+  discount    Float
+  isPublic    Boolean
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+//////////////////////
+// ADDRESS
+//////////////////////
+
+model Address {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  email     String
+  street    String
+  city      String
+  state     String
+  zip       String
+  country   String
+  phone     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+//////////////////////
+// RATING
+//////////////////////
+
+model Rating {
+  id        String   @id @default(cuid())
+  rating    Int
+  review    String
+  userId    String
+  productId String
+  orderId   String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId, orderId])
+}
+
+//////////////////////
+// AUDIT LOGS
+//////////////////////
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+//////////////////////
+// DYNAMIC RBAC SYSTEM
+//////////////////////
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  tenantId    String?  @map("tenant_id") // null = platform role
+  storeId     String? // optional store-level role
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  store  Store?  @relation(fields: [storeId], references: [id])
+
+  permissions RolePermission[]
+  users       UserRoleAssignment[]
+
+  @@index([tenantId])
+  @@index([storeId])
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  module      String // orders, inventory, users, reports etc.
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRoleAssignment {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  tenantId  String?  @map("tenant_id")
+  storeId   String?
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  store  Store?  @relation(fields: [storeId], references: [id])
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([storeId])
 }
