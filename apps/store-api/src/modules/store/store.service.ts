@@ -19,8 +19,9 @@ export class StoreService {
     });
   }
 
-  findAll() {
+  findAll(tenantId: string | null) {
     return this.prisma.store.findMany({
+      ...(tenantId ? { where: { tenantId } } : {}),
       orderBy: { id: 'desc' },
     });
   }

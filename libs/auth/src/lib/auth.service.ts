@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, PrismaClient, User } from '@prisma/client';
+import { Prisma, User } from '@prisma/client';
 import { PrismaService } from 'database';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
@@ -25,7 +25,9 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async signupCustomer(dto: CustomerSignupDto): Promise<{ access_token: string }> {
+  async signupCustomer(
+    dto: CustomerSignupDto,
+  ): Promise<{ access_token: string }> {
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -51,7 +53,7 @@ export class AuthService {
 
   async signupVendor(dto: VendorSignupDto): Promise<{ access_token: string }> {
     const result = await this.prisma.$transaction(async (tx) => {
-      const user = await this.findOrCreateVendorOwner(tx, dto);
+      let user = await this.findOrCreateVendorOwner(tx, dto);
 
       const existingTenant = await tx.tenant.findUnique({
         where: { ownerId: user.id },
@@ -79,10 +81,8 @@ export class AuthService {
         },
       });
 
-      const { vendorOwnerRole, storeManagerRole } = await this.ensureSystemRoles(
-        tx,
-        tenant.id,
-      );
+      const { vendorOwnerRole, storeManagerRole } =
+        await this.ensureSystemRoles(tx, tenant.id);
       await this.ensureDefaultPermissions(tx);
       await this.assignAllPermissionsToRole(tx, vendorOwnerRole.id);
 
@@ -100,6 +100,10 @@ export class AuthService {
             storeId: store.id,
           },
         ],
+      });
+      user = await tx.user.update({
+        where: { id: user.id },
+        data: { storeId: store.id },
       });
 
       return { user, tenantId: tenant.id };
@@ -134,7 +138,9 @@ export class AuthService {
     return this.buildAccessToken(user, tenantId);
   }
 
-  async profile(userId: string): Promise<{ id: string; email: string; name: string }> {
+  async profile(
+    userId: string,
+  ): Promise<{ id: string; email: string; name: string }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
     if (!user) {
@@ -193,7 +199,10 @@ export class AuthService {
     });
   }
 
-  private async ensureSystemRoles(tx: Prisma.TransactionClient, tenantId: string) {
+  private async ensureSystemRoles(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ) {
     const vendorOwnerRole = await this.findOrCreateRole(tx, {
       tenantId,
       name: SYSTEM_ROLE_VENDOR_OWNER,
@@ -242,7 +251,9 @@ export class AuthService {
     });
   }
 
-  private async ensureDefaultPermissions(tx: Prisma.TransactionClient): Promise<void> {
+  private async ensureDefaultPermissions(
+    tx: Prisma.TransactionClient,
+  ): Promise<void> {
     for (const permission of DEFAULT_PERMISSION_SEED) {
       await tx.permission.upsert({
         where: { name: permission.name },

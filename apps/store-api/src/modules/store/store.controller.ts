@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AppRole } from 'models';
@@ -13,6 +14,13 @@ import { JwtAuthGuard, Roles, RolesGuard } from 'auth';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { StoreService } from './store.service';
+import { Request } from 'express';
+
+interface RequestWithUser extends Request {
+  user: {
+    tenantId: string | null;
+  };
+}
 
 @Controller('stores')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -26,9 +34,9 @@ export class StoreController {
   }
 
   @Get()
-  @Roles(AppRole.ADMIN, AppRole.STORE, AppRole.USER)
-  findAll() {
-    return this.storeService.findAll();
+  // @Roles(AppRole.ADMIN, AppRole.STORE, AppRole.USER)
+  findAll(@Req() req: RequestWithUser) {
+    return this.storeService.findAll(req.user.tenantId);
   }
 
   @Get(':id')
