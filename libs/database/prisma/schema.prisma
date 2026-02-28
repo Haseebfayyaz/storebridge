@@ -53,6 +53,29 @@ enum TransactionType {
 //////////////////////
 // USER & AUTH
 //////////////////////
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique // The hashed or unique UUID string
+  userId    String
+  tenantId  String
+  
+  // Metadata for Security
+  userAgent String?  // Stores browser/device info (e.g., "Chrome on Windows")
+  ipAddress String?  // Stores the login IP
+  
+  // Status & Expiry
+  isRevoked Boolean  @default(false)
+  expiresAt DateTime
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
 
 model User {
   id         String    @id
@@ -80,6 +103,7 @@ model User {
   storeId      String?
   parentOrders ParentOrder[]
   auditLogs    AuditLog[]
+  refreshTokens RefreshToken[] 
 }
 
 //////////////////////
@@ -104,6 +128,9 @@ model Tenant {
   warehouses          Warehouse[]
   roles               Role[]
   userRoleAssignments UserRoleAssignment[]
+  refreshTokens RefreshToken[]
+  taxClasses    TaxClass[]
+  categories    Category[]
 }
 
 //////////////////////
@@ -140,20 +167,44 @@ model Store {
 // PRODUCT CATALOG (SHARED PER VENDOR)
 //////////////////////
 
+model Category {
+  id          String    @id @default(cuid())
+  tenantId    String
+  name        String
+  slug        String    // e.g., "dairy-products"
+  
+  // SELF-RELATION for Nesting
+  parentId    String?   // The "Dairy" category would have "Grocery" as its parent
+  parent      Category?  @relation("SubCategories", fields: [parentId], references: [id])
+  children    Category[] @relation("SubCategories")
+  tenant      Tenant     @relation(fields: [tenantId], references: [id])
+
+  products    Product[]
+  
+  @@unique([tenantId, slug]) // Prevent duplicate slugs within the same tenant
+}
+
 model Product {
   id          String    @id @default(cuid())
   tenantId    String    @map("tenant_id")
   name        String
   description String
-  category    String
+   categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id])
+  
+  // TAX LOGIC
+  // Connect to a TaxClass so "Grocery" and "Electronics" have different rates
+  taxClassId  String?
+  taxClass    TaxClass? @relation(fields: [taxClassId], references: [id])
+
   isActive    Boolean   @default(true)
   isDeleted   Boolean   @default(false)
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id])
-  variants ProductVariant[]
+  tenant     Tenant           @relation(fields: [tenantId], references: [id])
+  variants ProductVariant[] // Every product has at least 1 variant
   ratings  Rating[]
 
   @@index([tenantId])
@@ -163,31 +214,48 @@ model ProductVariant {
   id        String   @id @default(cuid())
   productId String
   sku       String   @unique
+  barcode   String?  @unique // Critical for scanning handsfree/chargers
+  
+  // ATTRIBUTES
+  // For Charger: these stay null. For Handsfree: "Red", "Blue", etc.
+  color     String?
   size      String?
-  weight    String?
-  price     Float
-  mrp       Float?
+  weight    Float?
+  weightUnit String? // e.g., "kg", "g"
+
+  // GLOBAL/DEFAULT PRICING
+  price     Float    // Default Selling Price
+  costPrice Float    // Default Purchase Cost
+  mrp       Float?   // Max Retail Price
+  
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   product              Product              @relation(fields: [productId], references: [id])
-  inventories          Inventory[]
+  inventories          Inventory[]          // Links to different stores
   orderItems           OrderItem[]
   warehouseInventories WarehouseInventory[]
 
   @@index([productId])
 }
 
-//////////////////////
-// INVENTORY PER STORE
-//////////////////////
-
 model Inventory {
   id          String   @id @default(cuid())
   storeId     String
   variantId   String
-  stockQty    Int
+  
+  // PER-STORE STOCK
+  stockQty    Int      @default(0)
   reservedQty Int      @default(0)
   lowStock    Int      @default(5)
+
+  // PER-STORE PRICING OVERRIDES
+  // Use these if Store A is more expensive than Store B. 
+  // If null, code falls back to ProductVariant price.
+  storePrice     Float?   
+  storeCostPrice Float?
+  storeMrp       Float?
+
   updatedAt   DateTime @updatedAt
 
   store   Store          @relation(fields: [storeId], references: [id])
@@ -195,6 +263,15 @@ model Inventory {
 
   @@unique([storeId, variantId])
   @@index([storeId])
+}
+
+model TaxClass {
+  id        String    @id @default(cuid())
+  tenantId  String
+  name      String    // e.g., "GST 18%", "Zero Rated"
+  rate      Float     // e.g., 18.0
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  products  Product[]
 }
 
 //////////////////////

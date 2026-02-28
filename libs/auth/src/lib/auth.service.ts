@@ -13,6 +13,7 @@ import { LoginDto } from './dto/login.dto';
 import { CustomerSignupDto } from './dto/customer-signup.dto';
 import { VendorSignupDto } from './dto/vendor-signup.dto';
 import {
+  DEFAULT_CATEGORY_SEED,
   DEFAULT_PERMISSION_SEED,
   SYSTEM_ROLE_STORE_MANAGER,
   SYSTEM_ROLE_VENDOR_OWNER,
@@ -70,6 +71,7 @@ export class AuthService {
           ownerId: user.id,
         },
       });
+      await this.seedDefaultCategories(tx, tenant.id);
 
       const store = await tx.store.create({
         data: {
@@ -265,6 +267,20 @@ export class AuthService {
         },
       });
     }
+  }
+
+  private async seedDefaultCategories(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ): Promise<void> {
+    await tx.category.createMany({
+      data: DEFAULT_CATEGORY_SEED.map((category) => ({
+        tenantId,
+        name: category.name,
+        slug: category.slug,
+      })),
+      skipDuplicates: true,
+    });
   }
 
   private async assignAllPermissionsToRole(

@@ -17,3 +17,16 @@ export const DEFAULT_PERMISSION_SEED = [
   { name: 'roles.read', module: 'roles', description: 'Read roles' },
   { name: 'roles.write', module: 'roles', description: 'Manage roles and permissions' },
 ] as const;
+
+export const DEFAULT_CATEGORY_SEED = [
+  { name: 'Electronics', slug: 'electronics' },
+  { name: 'Clothing', slug: 'clothing' },
+  { name: 'Home & Kitchen', slug: 'home-kitchen' },
+  { name: 'Beauty & Health', slug: 'beauty-health' },
+  { name: 'Toys & Games', slug: 'toys-games' },
+  { name: 'Sports & Outdoors', slug: 'sports-outdoors' },
+  { name: 'Books & Media', slug: 'books-media' },
+  { name: 'Food & Drink', slug: 'food-drink' },
+  { name: 'Hobbies & Crafts', slug: 'hobbies-crafts' },
+  { name: 'Others', slug: 'others' },
+] as const;
