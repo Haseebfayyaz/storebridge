@@ -248,6 +248,7 @@ model Inventory {
   stockQty    Int      @default(0)
   reservedQty Int      @default(0)
   lowStock    Int      @default(5)
+  isDeleted   Boolean  @default(false)
 
   // PER-STORE PRICING OVERRIDES
   // Use these if Store A is more expensive than Store B. 
@@ -263,6 +264,7 @@ model Inventory {
 
   @@unique([storeId, variantId])
   @@index([storeId])
+  @@index([storeId, isDeleted, updatedAt])
 }
 
 model TaxClass {

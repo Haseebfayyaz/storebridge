@@ -35,6 +35,7 @@
     "@nestjs/config": "^4.0.2",
     "@nestjs/jwt": "^11.0.1",
     "@nestjs/passport": "^11.0.5",
+    "@elastic/elasticsearch": "^8.19.0",
     "@prisma/client": "^6.16.2",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",

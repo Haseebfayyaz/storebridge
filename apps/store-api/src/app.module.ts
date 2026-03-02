@@ -4,6 +4,9 @@ import { AppConfigModule } from 'config';
 import { DatabaseModule } from 'database';
 import { AppAuthController } from './modules/auth/auth.controller';
 import { StoreModule } from './modules/store/store.module';
+import { CategoryModule } from './modules/category/category.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { ProductModule } from './modules/product/product.module';
 
 @Module({
   imports: [
@@ -11,6 +14,9 @@ import { StoreModule } from './modules/store/store.module';
     DatabaseModule,
     AuthModule,
     StoreModule,
+    CategoryModule,
+    ProductModule,
+    InventoryModule,
   ],
   controllers: [AppAuthController],
 })
