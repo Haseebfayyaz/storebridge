@@ -8,6 +8,7 @@ import { Inventory, Prisma, ProductVariant } from '@prisma/client';
 import { PrismaService } from 'database';
 import { ElasticsearchService } from '../elasticsearch/elasticsearch.service';
 import { InventoryAction } from '../inventory/interfaces/inventory-action.enum';
+import { InventoryLog } from '../inventory/interfaces/inventory-log.interface';
 import { CreateFullItemDto } from './dto/create-full-item.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateProductVariantDto } from './dto/create-product-variant.dto';
@@ -273,7 +274,7 @@ export class ProductService {
     });
 
     for (const log of logs) {
-      await this.elasticService.logInventoryChange({
+      const inventoryLog: InventoryLog = {
         inventoryId: log.inventoryId,
         tenantId,
         storeId: log.storeId,
@@ -284,7 +285,9 @@ export class ProductService {
         newStock: log.newStock,
         changedBy: user.sub,
         timestamp: new Date().toISOString(),
-      });
+      };
+
+      await this.elasticService.logInventoryChange(inventoryLog);
     }
 
     return result;
