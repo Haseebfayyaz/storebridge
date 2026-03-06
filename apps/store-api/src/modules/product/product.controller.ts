@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from 'auth';
@@ -11,6 +13,8 @@ import { CurrentUser } from 'common';
 import { CreateFullItemDto } from './dto/create-full-item.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateProductVariantDto } from './dto/create-product-variant.dto';
+import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { ProductListingService } from './product-listing.service';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductVariantDto } from './dto/update-product-variant.dto';
 import { ProductService } from './product.service';
@@ -23,7 +27,10 @@ interface RequestUser {
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class ProductController {
-  constructor(private readonly productService: ProductService) {}
+  constructor(
+    private readonly productService: ProductService,
+    private readonly productListingService: ProductListingService,
+  ) {}
 
   @Post('products')
   createProduct(@Body() dto: CreateProductDto, @CurrentUser() user: RequestUser) {
@@ -60,5 +67,13 @@ export class ProductController {
   @Post('products/full-item')
   createFullItem(@Body() dto: CreateFullItemDto, @CurrentUser() user: RequestUser) {
     return this.productService.createFullItem(dto, user);
+  }
+
+  @Get('products')
+  listing(
+    @Query() query: ListProductsQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.productListingService.listing(query, user.tenantId);
   }
 }
