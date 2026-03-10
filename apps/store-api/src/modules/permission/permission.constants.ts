@@ -1,36 +1,23 @@
-export const JWT_DEFAULT_EXPIRES_IN = '1d';
-
-export const SYSTEM_ROLE_VENDOR_OWNER = 'Vendor Owner';
-export const SYSTEM_ROLE_STORE_MANAGER = 'Store Manager';
-
-export const DEFAULT_PERMISSION_SEED = [
+export const SAAS_DEFAULT_PERMISSIONS = [
   { name: 'product.create', module: 'products', description: 'Create products' },
   { name: 'product.update', module: 'products', description: 'Update products' },
   { name: 'product.delete', module: 'products', description: 'Delete products' },
   { name: 'product.view', module: 'products', description: 'View products' },
+
   { name: 'order.create', module: 'orders', description: 'Create orders' },
   { name: 'order.view', module: 'orders', description: 'View orders' },
+
   { name: 'invoice.create', module: 'invoices', description: 'Create invoices' },
   { name: 'invoice.view', module: 'invoices', description: 'View invoices' },
+
   { name: 'category.create', module: 'categories', description: 'Create categories' },
   { name: 'category.update', module: 'categories', description: 'Update categories' },
   { name: 'category.delete', module: 'categories', description: 'Delete categories' },
+
   { name: 'taxclass.create', module: 'taxes', description: 'Create tax classes' },
   { name: 'taxclass.update', module: 'taxes', description: 'Update tax classes' },
   { name: 'taxclass.delete', module: 'taxes', description: 'Delete tax classes' },
+
   { name: 'inventory.update', module: 'inventory', description: 'Update inventory' },
   { name: 'user.manage', module: 'users', description: 'Manage users' },
-] as const;
-
-export const DEFAULT_CATEGORY_SEED = [
-  { name: 'Electronics', slug: 'electronics' },
-  { name: 'Clothing', slug: 'clothing' },
-  { name: 'Home & Kitchen', slug: 'home-kitchen' },
-  { name: 'Beauty & Health', slug: 'beauty-health' },
-  { name: 'Toys & Games', slug: 'toys-games' },
-  { name: 'Sports & Outdoors', slug: 'sports-outdoors' },
-  { name: 'Books & Media', slug: 'books-media' },
-  { name: 'Food & Drink', slug: 'food-drink' },
-  { name: 'Hobbies & Crafts', slug: 'hobbies-crafts' },
-  { name: 'Others', slug: 'others' },
 ] as const;

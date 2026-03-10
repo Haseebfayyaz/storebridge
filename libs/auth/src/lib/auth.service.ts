@@ -29,6 +29,7 @@ export class AuthService {
   async signupCustomer(
     dto: CustomerSignupDto,
   ): Promise<{ access_token: string }> {
+    const userCount = await this.prisma.user.count();
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -46,6 +47,7 @@ export class AuthService {
         email: dto.email,
         mobile: dto.phone,
         password: hashedPassword,
+        isSuperAdmin: userCount === 0,
       },
     });
 
@@ -53,6 +55,30 @@ export class AuthService {
   }
 
   async signupVendor(dto: VendorSignupDto): Promise<{ access_token: string }> {
+    const userCount = await this.prisma.user.count();
+    if (userCount === 0) {
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email: dto.admin.email },
+      });
+
+      if (existingUser) {
+        throw new ConflictException('Email already exists');
+      }
+
+      const hashedPassword = await bcrypt.hash(dto.admin.password, 12);
+      const user = await this.prisma.user.create({
+        data: {
+          id: randomUUID(),
+          name: dto.admin.name,
+          email: dto.admin.email,
+          password: hashedPassword,
+          isSuperAdmin: true,
+        },
+      });
+
+      return this.buildAccessToken(user, null);
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       let user = await this.findOrCreateVendorOwner(tx, dto);
 
@@ -210,6 +236,7 @@ export class AuthService {
       name: SYSTEM_ROLE_VENDOR_OWNER,
       description: 'Full access over tenant resources',
       isSystem: true,
+      isAdmin: true,
     });
 
     const storeManagerRole = await this.findOrCreateRole(tx, {
@@ -217,6 +244,7 @@ export class AuthService {
       name: SYSTEM_ROLE_STORE_MANAGER,
       description: 'Store-level operational access',
       isSystem: true,
+      isAdmin: false,
     });
 
     return { vendorOwnerRole, storeManagerRole };
@@ -229,6 +257,7 @@ export class AuthService {
       name: string;
       description: string;
       isSystem: boolean;
+      isAdmin: boolean;
     },
   ) {
     const role = await tx.role.findFirst({
@@ -248,6 +277,7 @@ export class AuthService {
         name: data.name,
         description: data.description,
         isSystem: data.isSystem,
+        isAdmin: data.isAdmin,
         tenantId: data.tenantId,
       },
     });
@@ -312,6 +342,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       tenantId,
+      isSuperAdmin: user.isSuperAdmin,
     };
 
     return {

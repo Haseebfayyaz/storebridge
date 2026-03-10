@@ -22,7 +22,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy --schema=libs/database/prisma/schema.prisma",
     "prisma:migrate:status": "prisma migrate status --schema=libs/database/prisma/schema.prisma",
     "prisma:migrate:reset": "prisma migrate reset --schema=libs/database/prisma/schema.prisma",
-    "prisma:studio": "prisma studio --schema=libs/database/prisma/schema.prisma"
+    "prisma:studio": "prisma studio --schema=libs/database/prisma/schema.prisma",
+    "prisma:seed:permissions": "ts-node libs/database/prisma/seed-permissions.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

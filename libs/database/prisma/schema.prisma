@@ -87,8 +87,10 @@ model User {
   isBlocked  Boolean   @default(false)
   isVerified Boolean   @default(false)
   isDeleted  Boolean   @default(false)
+  isSuperAdmin Boolean @default(false)
   deletedAt  DateTime?
   createdAt  DateTime  @default(now())
+  createdById String?
 
   wallet     Wallet?
   addresses  Address[]
@@ -98,6 +100,9 @@ model User {
 
   tenant       Tenant?
   managedStore Store?  @relation(fields: [storeId], references: [id])
+
+  createdBy User? @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers User[] @relation("UserCreatedBy")
 
   roles        UserRoleAssignment[] // NEW
   storeId      String?
@@ -499,6 +504,7 @@ model Role {
   tenantId    String?  @map("tenant_id") // null = platform role
   storeId     String? // optional store-level role
   isSystem    Boolean  @default(false)
+  isAdmin     Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])

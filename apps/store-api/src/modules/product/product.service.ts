@@ -85,6 +85,27 @@ export class ProductService {
     });
   }
 
+  async deleteProduct(productId: string, tenantId: string | null) {
+    const scopedTenantId = this.requireTenant(tenantId);
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, tenantId: scopedTenantId, isDeleted: false },
+      select: { id: true },
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Product with id "${productId}" not found`);
+    }
+
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: {
+        isDeleted: true,
+        isActive: false,
+        deletedAt: new Date(),
+      },
+    });
+  }
+
   async createVariant(
     productId: string,
     dto: CreateProductVariantDto,

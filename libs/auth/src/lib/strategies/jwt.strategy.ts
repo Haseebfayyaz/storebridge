@@ -8,6 +8,7 @@ export interface JwtPayload {
   email: string;
   role: string;
   tenantId: string | null;
+  isSuperAdmin?: boolean;
 }
 
 @Injectable()

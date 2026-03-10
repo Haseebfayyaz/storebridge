@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -46,6 +47,11 @@ export class ProductController {
     return this.productService.updateProduct(id, dto, user.tenantId);
   }
 
+  @Delete('products/:id')
+  deleteProduct(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.productService.deleteProduct(id, user.tenantId);
+  }
+
   @Post('products/:productId/variants')
   createVariant(
     @Param('productId') productId: string,
@@ -69,7 +75,7 @@ export class ProductController {
     return this.productService.createFullItem(dto, user);
   }
 
-  @Get('products')
+  @Get('products/listing')
   listing(
     @Query() query: ListProductsQueryDto,
     @CurrentUser() user: RequestUser,

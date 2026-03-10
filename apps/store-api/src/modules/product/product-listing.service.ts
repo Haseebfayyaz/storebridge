@@ -97,7 +97,7 @@ export class ProductListingService {
         name: row.name,
         description: row.description,
         categoryId: row.categoryId,
-        taxClassId: row.taxClassId,
+        taxClassId: row.taxClassId ?? null,
         isActive: row.isActive,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
