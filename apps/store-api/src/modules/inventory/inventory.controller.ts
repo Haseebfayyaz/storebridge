@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Query,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -11,6 +12,7 @@ import { JwtAuthGuard } from 'auth';
 import { CurrentUser } from 'common';
 import { AdjustReserveStockDto } from './dto/adjust-reserve-stock.dto';
 import { CreateInventoryDto } from './dto/create-inventory.dto';
+import { ListInventoryQueryDto } from './dto/list-inventory-query.dto';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
 import { InventoryService } from './inventory.service';
 
@@ -27,6 +29,11 @@ export class InventoryController {
   @Post()
   create(@Body() dto: CreateInventoryDto, @CurrentUser() user: RequestUser) {
     return this.inventoryService.createInventory(dto, user.sub, user.tenantId);
+  }
+
+  @Get('listing')
+  list(@Query() query: ListInventoryQueryDto) {
+    return this.inventoryService.listInventoryForBuyers(query);
   }
 
   @Get('store/:storeId/variant/:variantId')
