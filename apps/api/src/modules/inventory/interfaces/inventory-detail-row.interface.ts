@@ -1,0 +1,34 @@
+export interface InventoryDetailRow {
+  inventoryId: string;
+  storeId: string;
+  variantId: string;
+  stockQty: number | string;
+  reservedQty: number | string;
+  availableQty: number | string;
+  storePrice: number | string | null;
+  storeCostPrice: number | string | null;
+  storeMrp: number | string | null;
+  updatedAt: Date;
+  storeName: string;
+  storeCity: string;
+  storeCountry: string;
+  storeTimezone: string;
+  storeLatitude: number | null;
+  storeLongitude: number | null;
+  productId: string;
+  productName: string;
+  productDescription: string;
+  productCategoryId: string;
+  productCreatedAt: Date;
+  categoryName: string;
+  categorySlug: string;
+  variantSku: string;
+  variantBarcode: string | null;
+  variantColor: string | null;
+  variantSize: string | null;
+  variantWeight: number | null;
+  variantWeightUnit: string | null;
+  variantPrice: number | string;
+  variantCostPrice: number | string;
+  variantMrp: number | string | null;
+}

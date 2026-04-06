@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ListInventoryQueryDto } from './dto/list-inventory-query.dto';
 import { InventoryService } from './inventory.service';
 
@@ -9,5 +9,15 @@ export class InventoryController {
   @Get('listing')
   list(@Query() query: ListInventoryQueryDto) {
     return this.inventoryService.listInventoryForBuyers(query);
+  }
+
+  @Get(':id')
+  detail(@Param('id') id: string) {
+    return this.inventoryService.getInventoryDetail(id);
+  }
+
+  @Get(':id/similar')
+  similar(@Param('id') id: string) {
+    return this.inventoryService.getSimilarItemsByCategory(id);
   }
 }

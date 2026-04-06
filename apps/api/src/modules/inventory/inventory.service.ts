@@ -1,41 +1,15 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'database';
+import { InventoryDetailRow } from './interfaces/inventory-detail-row.interface';
+import { InventoryListingRow } from './interfaces/inventory-listing-row.interface';
 import { ListInventoryQueryDto } from './dto/list-inventory-query.dto';
 
-interface InventoryListingRow {
-  inventoryId: string;
-  storeId: string;
-  variantId: string;
-  stockQty: number | string;
-  reservedQty: number | string;
-  availableQty: number | string;
-  storePrice: number | string | null;
-  storeCostPrice: number | string | null;
-  storeMrp: number | string | null;
-  updatedAt: Date;
-  storeName: string;
-  storeCity: string;
-  storeCountry: string;
-  storeTimezone: string;
-  storeLatitude: number | null;
-  storeLongitude: number | null;
-  productId: string;
-  productName: string;
-  productDescription: string;
-  productCategoryId: string;
-  productCreatedAt: Date;
-  variantSku: string;
-  variantBarcode: string | null;
-  variantColor: string | null;
-  variantSize: string | null;
-  variantWeight: number | null;
-  variantWeightUnit: string | null;
-  variantPrice: number | string;
-  variantCostPrice: number | string;
-  variantMrp: number | string | null;
-  sortValue: Date | number | string;
-}
+interface SimilarItemRow extends InventoryDetailRow {}
 
 interface InventoryCursor {
   sortValue: string | number | Date;
@@ -202,6 +176,216 @@ export class InventoryService {
         storeId: query.storeId ?? null,
       },
     };
+  }
+
+  async getInventoryDetail(inventoryId: string) {
+    const rows = await this.prisma.$queryRaw<InventoryDetailRow[]>(Prisma.sql`
+      SELECT
+        i."id" as "inventoryId",
+        i."storeId",
+        i."variantId",
+        i."stockQty",
+        i."reservedQty",
+        (i."stockQty" - i."reservedQty") as "availableQty",
+        i."storePrice",
+        i."storeCostPrice",
+        i."storeMrp",
+        i."updatedAt",
+        s."name" as "storeName",
+        s."city" as "storeCity",
+        s."country" as "storeCountry",
+        s."timezone" as "storeTimezone",
+        s."latitude" as "storeLatitude",
+        s."longitude" as "storeLongitude",
+        p."id" as "productId",
+        p."name" as "productName",
+        p."description" as "productDescription",
+        p."categoryId" as "productCategoryId",
+        p."createdAt" as "productCreatedAt",
+        c."name" as "categoryName",
+        c."slug" as "categorySlug",
+        pv."sku" as "variantSku",
+        pv."barcode" as "variantBarcode",
+        pv."color" as "variantColor",
+        pv."size" as "variantSize",
+        pv."weight" as "variantWeight",
+        pv."weightUnit" as "variantWeightUnit",
+        pv."price" as "variantPrice",
+        pv."costPrice" as "variantCostPrice",
+        pv."mrp" as "variantMrp"
+      FROM "Inventory" i
+      JOIN "Store" s ON s."id" = i."storeId"
+      JOIN "ProductVariant" pv ON pv."id" = i."variantId"
+      JOIN "Product" p ON p."id" = pv."productId"
+      JOIN "Category" c ON c."id" = p."categoryId"
+      WHERE
+        i."id" = ${inventoryId}
+        AND i."isDeleted" = false
+        AND p."isDeleted" = false
+        AND p."isActive" = true
+        AND s."isDeleted" = false
+        AND s."isActive" = true
+      LIMIT 1
+    `);
+
+    const row = rows[0];
+    if (!row) {
+      throw new NotFoundException('Inventory item not found');
+    }
+
+    const price = Number(row.storePrice ?? row.variantPrice);
+    const mrp = row.storeMrp ?? row.variantMrp;
+
+    return {
+      inventoryId: row.inventoryId,
+      store: {
+        id: row.storeId,
+        name: row.storeName,
+        city: row.storeCity,
+        country: row.storeCountry,
+        timezone: row.storeTimezone,
+        latitude: row.storeLatitude,
+        longitude: row.storeLongitude,
+      },
+      product: {
+        id: row.productId,
+        name: row.productName,
+        description: row.productDescription,
+        category: {
+          id: row.productCategoryId,
+          name: row.categoryName,
+          slug: row.categorySlug,
+        },
+        createdAt: row.productCreatedAt,
+      },
+      variant: {
+        id: row.variantId,
+        sku: row.variantSku,
+        barcode: row.variantBarcode,
+        color: row.variantColor,
+        size: row.variantSize,
+        weight: row.variantWeight,
+        weightUnit: row.variantWeightUnit,
+      },
+      quantity: {
+        stockQty: Number(row.stockQty),
+        reservedQty: Number(row.reservedQty),
+        availableQty: Number(row.availableQty),
+      },
+      pricing: {
+        price,
+        mrp: mrp === null ? null : Number(mrp),
+        storePrice: row.storePrice === null ? null : Number(row.storePrice),
+        storeMrp: row.storeMrp === null ? null : Number(row.storeMrp),
+      },
+      images: [],
+    };
+  }
+
+  async getSimilarItemsByCategory(inventoryId: string) {
+    const base = await this.getInventoryDetail(inventoryId);
+
+    const rows = await this.prisma.$queryRaw<SimilarItemRow[]>(Prisma.sql`
+      SELECT
+        i."id" as "inventoryId",
+        i."storeId",
+        i."variantId",
+        i."stockQty",
+        i."reservedQty",
+        (i."stockQty" - i."reservedQty") as "availableQty",
+        i."storePrice",
+        i."storeCostPrice",
+        i."storeMrp",
+        i."updatedAt",
+        s."name" as "storeName",
+        s."city" as "storeCity",
+        s."country" as "storeCountry",
+        s."timezone" as "storeTimezone",
+        s."latitude" as "storeLatitude",
+        s."longitude" as "storeLongitude",
+        p."id" as "productId",
+        p."name" as "productName",
+        p."description" as "productDescription",
+        p."categoryId" as "productCategoryId",
+        p."createdAt" as "productCreatedAt",
+        c."name" as "categoryName",
+        c."slug" as "categorySlug",
+        pv."sku" as "variantSku",
+        pv."barcode" as "variantBarcode",
+        pv."color" as "variantColor",
+        pv."size" as "variantSize",
+        pv."weight" as "variantWeight",
+        pv."weightUnit" as "variantWeightUnit",
+        pv."price" as "variantPrice",
+        pv."costPrice" as "variantCostPrice",
+        pv."mrp" as "variantMrp"
+      FROM "Inventory" i
+      JOIN "Store" s ON s."id" = i."storeId"
+      JOIN "ProductVariant" pv ON pv."id" = i."variantId"
+      JOIN "Product" p ON p."id" = pv."productId"
+      JOIN "Category" c ON c."id" = p."categoryId"
+      WHERE
+        i."isDeleted" = false
+        AND p."isDeleted" = false
+        AND p."isActive" = true
+        AND s."isDeleted" = false
+        AND s."isActive" = true
+        AND p."categoryId" = ${base.product.category.id}
+        AND i."storeId" = ${base.store.id}
+        AND p."id" <> ${base.product.id}
+      ORDER BY p."createdAt" DESC, i."id" DESC
+      LIMIT 5
+    `);
+
+    return rows.map((row) => {
+      const price = Number(row.storePrice ?? row.variantPrice);
+      const mrp = row.storeMrp ?? row.variantMrp;
+
+      return {
+        inventoryId: row.inventoryId,
+        store: {
+          id: row.storeId,
+          name: row.storeName,
+          city: row.storeCity,
+          country: row.storeCountry,
+          timezone: row.storeTimezone,
+          latitude: row.storeLatitude,
+          longitude: row.storeLongitude,
+        },
+        product: {
+          id: row.productId,
+          name: row.productName,
+          description: row.productDescription,
+          category: {
+            id: row.productCategoryId,
+            name: row.categoryName,
+            slug: row.categorySlug,
+          },
+          createdAt: row.productCreatedAt,
+        },
+        variant: {
+          id: row.variantId,
+          sku: row.variantSku,
+          barcode: row.variantBarcode,
+          color: row.variantColor,
+          size: row.variantSize,
+          weight: row.variantWeight,
+          weightUnit: row.variantWeightUnit,
+        },
+        quantity: {
+          stockQty: Number(row.stockQty),
+          reservedQty: Number(row.reservedQty),
+          availableQty: Number(row.availableQty),
+        },
+        pricing: {
+          price,
+          mrp: mrp === null ? null : Number(mrp),
+          storePrice: row.storePrice === null ? null : Number(row.storePrice),
+          storeMrp: row.storeMrp === null ? null : Number(row.storeMrp),
+        },
+        images: [],
+      };
+    });
   }
 
   private decodeCursor(cursor: string, sortBy: 'price' | 'date'): InventoryCursor {
