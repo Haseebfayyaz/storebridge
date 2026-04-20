@@ -21,6 +21,7 @@ enum UserRole {
 }
 
 enum OrderStatus {
+  PENDING
   ORDER_PLACED
   ACCEPTED
   PROCESSING
@@ -109,6 +110,7 @@ model User {
   parentOrders ParentOrder[]
   auditLogs    AuditLog[]
   refreshTokens RefreshToken[] 
+  cart         Cart?
 }
 
 //////////////////////
@@ -158,6 +160,7 @@ model Store {
 
   tenant              Tenant               @relation(fields: [tenantId], references: [id])
   inventories         Inventory[]
+  carts               Cart[]
   orders              Order[]
   managers            User[]
   commissions         Commission[]
@@ -266,6 +269,7 @@ model Inventory {
 
   store   Store          @relation(fields: [storeId], references: [id])
   variant ProductVariant @relation(fields: [variantId], references: [id])
+  cartItems CartItem[]
 
   @@unique([storeId, variantId])
   @@index([storeId])
@@ -331,6 +335,14 @@ model Order {
   status        OrderStatus   @default(ORDER_PLACED)
   paymentMethod PaymentMethod
   isPaid        Boolean       @default(false)
+  customerName  String?
+  customerEmail String?
+  customerPhone String?
+  shippingStreet  String?
+  shippingCity    String?
+  shippingState   String?
+  shippingZip     String?
+  shippingCountry String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -457,6 +469,33 @@ model Address {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Cart {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  storeId   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store     Store     @relation(fields: [storeId], references: [id])
+  items     CartItem[]
+}
+
+model CartItem {
+  id          String    @id @default(cuid())
+  cartId      String
+  inventoryId String
+  quantity    Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  cart      Cart      @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  inventory Inventory @relation(fields: [inventoryId], references: [id])
+
+  @@unique([cartId, inventoryId])
+  @@index([cartId])
 }
 
 //////////////////////

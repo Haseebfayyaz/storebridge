@@ -3,6 +3,7 @@ import { AuthModule } from 'auth';
 import { AppConfigModule } from 'config';
 import { DatabaseModule } from 'database';
 import { AppAuthController } from './modules/auth/auth.controller';
+import { CartModule } from './modules/cart/cart.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 
 @Module({
@@ -11,6 +12,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     DatabaseModule,
     AuthModule,
     InventoryModule,
+    CartModule,
   ],
   controllers: [AppAuthController],
 })
