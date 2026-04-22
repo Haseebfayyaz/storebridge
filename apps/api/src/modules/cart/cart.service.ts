@@ -396,7 +396,7 @@ export class CartService {
     });
 
     if (!order) {
-      throw new NotFoundException('Order not found');
+      throw new NotFoundException('Order not found.');
     }
 
     return {
