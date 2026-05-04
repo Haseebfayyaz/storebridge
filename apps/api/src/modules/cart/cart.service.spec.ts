@@ -85,6 +85,39 @@ describe('CartService', () => {
     });
   });
 
+  it('returns a cart snapshot with totals and line items', async () => {
+    prisma.cart.findUnique.mockResolvedValue({
+      id: 'cart-1',
+      store: { id: 'store-1', name: 'Main Store', city: 'Lahore', country: 'PK' },
+      items: [
+        {
+          inventoryId: 'inv-1',
+          quantity: 2,
+          inventory: {
+            variantId: 'var-1',
+            storePrice: 350,
+            variant: { price: 300, product: { name: 'Phone' } },
+          },
+        },
+      ],
+    });
+
+    const result = await service.getCart('u1');
+
+    expect(result.totals.subtotal).toBe(700);
+    expect(result.totals.itemCount).toBe(2);
+    expect(result.items).toEqual([
+      {
+        inventoryId: 'inv-1',
+        variantId: 'var-1',
+        productName: 'Phone',
+        quantity: 2,
+        unitPrice: 350,
+        lineTotal: 700,
+      },
+    ]);
+  });
+
   it('throws when adding item from another store', async () => {
     prisma.inventory.findFirst.mockResolvedValue({ id: 'inv-1', storeId: 'store-2' });
     prisma.cart.findUnique.mockResolvedValue({ id: 'cart-1', userId: 'u1', storeId: 'store-1' });
