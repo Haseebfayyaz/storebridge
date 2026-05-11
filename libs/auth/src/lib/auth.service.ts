@@ -168,8 +168,68 @@ export class AuthService {
 
   async profile(
     userId: string,
-  ): Promise<{ id: string; email: string; name: string }> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+  ): Promise<{
+    id: string;
+    email: string;
+    name: string;
+    phone: string | null;
+    image: string | null;
+    createdAt: Date;
+    isVerified: boolean;
+    isBlocked: boolean;
+    isSuperAdmin: boolean;
+    stats: {
+      ordersCount: number;
+      addressesCount: number;
+      lastOrderAt: Date | null;
+      lastOrderStatus: string | null;
+    };
+    latestAddress: {
+      id: string;
+      name: string;
+      email: string;
+      street: string;
+      city: string;
+      state: string;
+      zip: string;
+      country: string;
+      phone: string;
+    } | null;
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        _count: {
+          select: {
+            orders: true,
+            addresses: true,
+          },
+        },
+        orders: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            createdAt: true,
+            status: true,
+          },
+        },
+        addresses: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            street: true,
+            city: true,
+            state: true,
+            zip: true,
+            country: true,
+            phone: true,
+          },
+        },
+      },
+    });
 
     if (!user) {
       throw new UnauthorizedException('User not found');
@@ -179,6 +239,19 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: user.name,
+      phone: user.mobile,
+      image: user.image,
+      createdAt: user.createdAt,
+      isVerified: user.isVerified,
+      isBlocked: user.isBlocked,
+      isSuperAdmin: user.isSuperAdmin,
+      stats: {
+        ordersCount: user._count.orders,
+        addressesCount: user._count.addresses,
+        lastOrderAt: user.orders[0]?.createdAt ?? null,
+        lastOrderStatus: user.orders[0]?.status ?? null,
+      },
+      latestAddress: user.addresses[0] ?? null,
     };
   }
 
