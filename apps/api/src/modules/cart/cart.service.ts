@@ -9,10 +9,14 @@ import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import { UpsertAddressDto } from './dto/upsert-address.dto';
+import { InventoryService } from '../inventory/inventory.service';
 
 @Injectable()
 export class CartService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryService,
+  ) {}
 
   async getCart(userId: string) {
     const cart = await this.prisma.cart.findUnique({
@@ -65,13 +69,10 @@ export class CartService {
 
   async addItem(userId: string, dto: AddCartItemDto) {
     return this.prisma.$transaction(async (tx) => {
-      const inventory = await tx.inventory.findFirst({
-        where: { id: dto.inventoryId, isDeleted: false },
-        select: { id: true, storeId: true },
-      });
-      if (!inventory) {
-        throw new NotFoundException('Inventory item not found');
-      }
+      const inventory = await this.inventoryService.getCartInventoryRecord(
+        tx,
+        dto.inventoryId,
+      );
 
       let cart = await tx.cart.findUnique({ where: { userId } });
       if (!cart) {
@@ -90,18 +91,7 @@ export class CartService {
         where: { cartId_inventoryId: { cartId: cart.id, inventoryId: dto.inventoryId } },
       });
 
-      const reserveDelta = dto.quantity;
-      const inventoryUpdate = await tx.$executeRaw(Prisma.sql`
-        UPDATE "Inventory"
-        SET "reservedQty" = "reservedQty" + ${reserveDelta}
-        WHERE "id" = ${dto.inventoryId}
-          AND "isDeleted" = false
-          AND ("stockQty" - "reservedQty") >= ${reserveDelta}
-      `);
-
-      if (inventoryUpdate === 0) {
-        throw new BadRequestException('Requested quantity is out of stock');
-      }
+      await this.inventoryService.reserveStock(tx, dto.inventoryId, dto.quantity);
 
       if (existing) {
         await tx.cartItem.update({
@@ -134,25 +124,9 @@ export class CartService {
 
       const delta = dto.quantity - item.quantity;
       if (delta > 0) {
-        const inventoryUpdate = await tx.$executeRaw(Prisma.sql`
-          UPDATE "Inventory"
-          SET "reservedQty" = "reservedQty" + ${delta}
-          WHERE "id" = ${dto.inventoryId}
-            AND "isDeleted" = false
-            AND ("stockQty" - "reservedQty") >= ${delta}
-        `);
-        if (inventoryUpdate === 0) {
-          throw new BadRequestException('Requested quantity is out of stock');
-        }
+        await this.inventoryService.reserveStock(tx, dto.inventoryId, delta);
       } else if (delta < 0) {
-        const releaseQty = Math.abs(delta);
-        const releaseUpdate = await tx.inventory.updateMany({
-          where: { id: dto.inventoryId, reservedQty: { gte: releaseQty } },
-          data: { reservedQty: { decrement: releaseQty } },
-        });
-        if (releaseUpdate.count === 0) {
-          throw new BadRequestException('Failed to update reserved quantity');
-        }
+        await this.inventoryService.releaseStock(tx, dto.inventoryId, Math.abs(delta));
       }
 
       await tx.cartItem.update({
@@ -178,13 +152,7 @@ export class CartService {
         throw new NotFoundException('Cart item not found');
       }
 
-      const releaseUpdate = await tx.inventory.updateMany({
-        where: { id: inventoryId, reservedQty: { gte: item.quantity } },
-        data: { reservedQty: { decrement: item.quantity } },
-      });
-      if (releaseUpdate.count === 0) {
-        throw new BadRequestException('Failed to release reserved stock');
-      }
+      await this.inventoryService.releaseStock(tx, inventoryId, item.quantity);
 
       await tx.cartItem.delete({ where: { id: item.id } });
 
@@ -217,103 +185,32 @@ export class CartService {
 
   async createOrder(userId: string, dto: CreateOrderDto) {
     return this.prisma.$transaction(async (tx) => {
-      const cart = await tx.cart.findUnique({
-        where: { userId },
-        include: { items: true },
-      });
-      if (!cart || cart.items.length === 0) {
-        throw new BadRequestException('Cart is empty');
-      }
+      const cart = await this.getCartForCheckout(tx, userId);
+      const checkoutQuote = await this.inventoryService.buildCheckoutQuote(
+        tx,
+        cart.storeId,
+        cart.items,
+      );
+      const shipping = await this.resolveCheckoutShipping(tx, userId, dto);
 
-      const inventoryRows = await tx.inventory.findMany({
-        where: { id: { in: cart.items.map((item) => item.inventoryId) } },
-        include: {
-          variant: {
-            include: {
-              product: { select: { id: true, name: true } },
-            },
-          },
-        },
-      });
-
-      if (inventoryRows.length !== cart.items.length) {
-        throw new BadRequestException('Some cart items are invalid');
-      }
-
-      const inventoryById = new Map(inventoryRows.map((row) => [row.id, row]));
-      let total = 0;
-      const orderItemsPayload: { variantId: string; quantity: number; price: number }[] = [];
-
-      for (const item of cart.items) {
-        const inventory = inventoryById.get(item.inventoryId);
-        if (!inventory) {
-          throw new BadRequestException('Cart item no longer available');
-        }
-        if (inventory.storeId !== cart.storeId) {
-          throw new BadRequestException('Cart contains invalid store items');
-        }
-        if (inventory.reservedQty < item.quantity || inventory.stockQty < item.quantity) {
-          throw new BadRequestException('Insufficient stock for checkout');
-        }
-        const price = inventory.storePrice ?? inventory.variant.price;
-        total += price * item.quantity;
-        orderItemsPayload.push({
-          variantId: inventory.variantId,
-          quantity: item.quantity,
-          price,
-        });
-      }
-
-      const addressFromDb = dto.addressId
-        ? await tx.address.findFirst({ where: { id: dto.addressId, userId } })
-        : await tx.address.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } });
-
-      const shipping = {
-        customerName: dto.name ?? addressFromDb?.name ?? null,
-        customerEmail: dto.email ?? addressFromDb?.email ?? null,
-        customerPhone: dto.phone ?? addressFromDb?.phone ?? null,
-        shippingStreet: dto.street ?? addressFromDb?.street ?? null,
-        shippingCity: dto.city ?? addressFromDb?.city ?? null,
-        shippingState: dto.state ?? addressFromDb?.state ?? null,
-        shippingZip: dto.zip ?? addressFromDb?.zip ?? null,
-        shippingCountry: dto.country ?? addressFromDb?.country ?? null,
-      };
-
-      if (!shipping.customerName || !shipping.customerPhone || !shipping.shippingStreet) {
-        throw new BadRequestException(
-          'Address and personal details are required to place order',
-        );
-      }
-
-      for (const item of cart.items) {
-        const stockUpdate = await tx.inventory.updateMany({
-          where: {
-            id: item.inventoryId,
-            stockQty: { gte: item.quantity },
-            reservedQty: { gte: item.quantity },
-          },
-          data: {
-            stockQty: { decrement: item.quantity },
-            reservedQty: { decrement: item.quantity },
-          },
-        });
-        if (stockUpdate.count === 0) {
-          throw new BadRequestException(
-            'Stock changed during checkout, please review cart and retry',
-          );
-        }
-      }
+      await this.inventoryService.captureCheckoutStock(tx, cart.items);
 
       const order = await tx.order.create({
         data: {
           userId,
           storeId: cart.storeId,
-          total,
+          total: checkoutQuote.total,
           status: 'PENDING',
           paymentMethod: (dto.paymentMethod ?? 'COD') as PaymentMethod,
           isPaid: false,
           ...shipping,
-          items: { create: orderItemsPayload },
+          items: {
+            create: checkoutQuote.items.map((item) => ({
+              variantId: item.variantId,
+              quantity: item.quantity,
+              price: item.price,
+            })),
+          },
         },
         include: {
           items: {
@@ -324,21 +221,9 @@ export class CartService {
         },
       });
 
-      await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-      await tx.cart.delete({ where: { id: cart.id } });
+      await this.clearCart(tx, cart.id);
 
-      return {
-        id: order.id,
-        status: order.status,
-        paymentMethod: order.paymentMethod,
-        total: order.total,
-        items: order.items.map((item) => ({
-          variantId: item.variantId,
-          productName: item.variant.product.name,
-          quantity: item.quantity,
-          price: item.price,
-        })),
-      };
+      return this.mapOrderSummary(order);
     });
   }
 
@@ -472,6 +357,79 @@ export class CartService {
         subtotal: items.reduce((sum, item) => sum + item.lineTotal, 0),
         itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
       },
+    };
+  }
+
+  private async getCartForCheckout(tx: Prisma.TransactionClient, userId: string) {
+    const cart = await tx.cart.findUnique({
+      where: { userId },
+      include: { items: true },
+    });
+
+    if (!cart || cart.items.length === 0) {
+      throw new BadRequestException('Cart is empty');
+    }
+
+    return cart;
+  }
+
+  private async resolveCheckoutShipping(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    dto: CreateOrderDto,
+  ) {
+    const addressFromDb = dto.addressId
+      ? await tx.address.findFirst({ where: { id: dto.addressId, userId } })
+      : await tx.address.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } });
+
+    const shipping = {
+      customerName: dto.name ?? addressFromDb?.name ?? null,
+      customerEmail: dto.email ?? addressFromDb?.email ?? null,
+      customerPhone: dto.phone ?? addressFromDb?.phone ?? null,
+      shippingStreet: dto.street ?? addressFromDb?.street ?? null,
+      shippingCity: dto.city ?? addressFromDb?.city ?? null,
+      shippingState: dto.state ?? addressFromDb?.state ?? null,
+      shippingZip: dto.zip ?? addressFromDb?.zip ?? null,
+      shippingCountry: dto.country ?? addressFromDb?.country ?? null,
+    };
+
+    if (!shipping.customerName || !shipping.customerPhone || !shipping.shippingStreet) {
+      throw new BadRequestException(
+        'Address and personal details are required to place order',
+      );
+    }
+
+    return shipping;
+  }
+
+  private async clearCart(tx: Prisma.TransactionClient, cartId: string) {
+    await tx.cartItem.deleteMany({ where: { cartId } });
+    await tx.cart.delete({ where: { id: cartId } });
+  }
+
+  private mapOrderSummary(order: {
+    id: string;
+    status: string;
+    paymentMethod: PaymentMethod;
+    total: number;
+    items: Array<{
+      variantId: string;
+      quantity: number;
+      price: number;
+      variant: { product: { name: string } };
+    }>;
+  }) {
+    return {
+      id: order.id,
+      status: order.status,
+      paymentMethod: order.paymentMethod,
+      total: order.total,
+      items: order.items.map((item) => ({
+        variantId: item.variantId,
+        productName: item.variant.product.name,
+        quantity: item.quantity,
+        price: item.price,
+      })),
     };
   }
 }

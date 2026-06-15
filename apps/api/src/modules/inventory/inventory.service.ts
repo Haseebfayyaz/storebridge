@@ -16,6 +16,28 @@ interface InventoryCursor {
   id: string;
 }
 
+export interface CheckoutCartItem {
+  inventoryId: string;
+  quantity: number;
+}
+
+export interface CartInventoryRecord {
+  id: string;
+  storeId: string;
+}
+
+export interface CheckoutOrderItem {
+  inventoryId: string;
+  variantId: string;
+  quantity: number;
+  price: number;
+}
+
+export interface CheckoutQuote {
+  total: number;
+  items: CheckoutOrderItem[];
+}
+
 @Injectable()
 export class InventoryService {
   constructor(private readonly prisma: PrismaService) {}
@@ -386,6 +408,137 @@ export class InventoryService {
         images: [],
       };
     });
+  }
+
+  async buildCheckoutQuote(
+    tx: Prisma.TransactionClient,
+    storeId: string,
+    items: CheckoutCartItem[],
+  ): Promise<CheckoutQuote> {
+    const inventoryRows = await tx.inventory.findMany({
+      where: { id: { in: items.map((item) => item.inventoryId) } },
+      select: {
+        id: true,
+        storeId: true,
+        variantId: true,
+        stockQty: true,
+        reservedQty: true,
+        storePrice: true,
+        variant: {
+          select: {
+            price: true,
+          },
+        },
+      },
+    });
+
+    if (inventoryRows.length !== items.length) {
+      throw new BadRequestException('Some cart items are invalid');
+    }
+
+    const inventoryById = new Map(inventoryRows.map((row) => [row.id, row]));
+    let total = 0;
+    const orderItems: CheckoutOrderItem[] = [];
+
+    for (const item of items) {
+      const inventory = inventoryById.get(item.inventoryId);
+      if (!inventory) {
+        throw new BadRequestException('Cart item no longer available');
+      }
+
+      if (inventory.storeId !== storeId) {
+        throw new BadRequestException('Cart contains invalid store items');
+      }
+
+      if (inventory.reservedQty < item.quantity || inventory.stockQty < item.quantity) {
+        throw new BadRequestException('Insufficient stock for checkout');
+      }
+
+      const price = inventory.storePrice ?? inventory.variant.price;
+      total += price * item.quantity;
+      orderItems.push({
+        inventoryId: inventory.id,
+        variantId: inventory.variantId,
+        quantity: item.quantity,
+        price,
+      });
+    }
+
+    return { total, items: orderItems };
+  }
+
+  async getCartInventoryRecord(
+    tx: Prisma.TransactionClient,
+    inventoryId: string,
+  ): Promise<CartInventoryRecord> {
+    const inventory = await tx.inventory.findFirst({
+      where: { id: inventoryId, isDeleted: false },
+      select: { id: true, storeId: true },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('Inventory item not found');
+    }
+
+    return inventory;
+  }
+
+  async captureCheckoutStock(
+    tx: Prisma.TransactionClient,
+    items: CheckoutCartItem[],
+  ) {
+    for (const item of items) {
+      const stockUpdate = await tx.inventory.updateMany({
+        where: {
+          id: item.inventoryId,
+          stockQty: { gte: item.quantity },
+          reservedQty: { gte: item.quantity },
+        },
+        data: {
+          stockQty: { decrement: item.quantity },
+          reservedQty: { decrement: item.quantity },
+        },
+      });
+
+      if (stockUpdate.count === 0) {
+        throw new BadRequestException(
+          'Stock changed during checkout, please review cart and retry',
+        );
+      }
+    }
+  }
+
+  async reserveStock(
+    tx: Prisma.TransactionClient,
+    inventoryId: string,
+    quantity: number,
+  ) {
+    const inventoryUpdate = await tx.$executeRaw(Prisma.sql`
+      UPDATE "Inventory"
+      SET "reservedQty" = "reservedQty" + ${quantity}
+      WHERE "id" = ${inventoryId}
+        AND "isDeleted" = false
+        AND ("stockQty" - "reservedQty") >= ${quantity}
+    `);
+
+    if (inventoryUpdate === 0) {
+      throw new BadRequestException('Requested quantity is out of stock');
+    }
+  }
+
+  async releaseStock(
+    tx: Prisma.TransactionClient,
+    inventoryId: string,
+    quantity: number,
+  ) {
+    const releaseUpdate = await tx.inventory.updateMany({
+      where: { id: inventoryId, reservedQty: { gte: quantity } },
+      data: { reservedQty: { decrement: quantity } },
+    });
+
+    if (releaseUpdate.count === 0) {
+      throw new BadRequestException('Failed to release reserved stock');
+    }
   }
 
   private decodeCursor(cursor: string, sortBy: 'price' | 'date'): InventoryCursor {

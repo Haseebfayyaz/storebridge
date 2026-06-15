@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from 'database';
 import { CartService } from './cart.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 describe('CartService', () => {
   let service: CartService;
@@ -13,6 +14,13 @@ describe('CartService', () => {
     order: Record<string, jest.Mock>;
     $transaction: jest.Mock;
     $executeRaw: jest.Mock;
+  };
+  let inventoryService: {
+    getCartInventoryRecord: jest.Mock;
+    reserveStock: jest.Mock;
+    releaseStock: jest.Mock;
+    buildCheckoutQuote: jest.Mock;
+    captureCheckoutStock: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -48,6 +56,13 @@ describe('CartService', () => {
       $transaction: jest.fn(),
       $executeRaw: jest.fn(),
     };
+    inventoryService = {
+      getCartInventoryRecord: jest.fn(),
+      reserveStock: jest.fn(),
+      releaseStock: jest.fn(),
+      buildCheckoutQuote: jest.fn(),
+      captureCheckoutStock: jest.fn(),
+    };
 
     prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
 
@@ -58,6 +73,10 @@ describe('CartService', () => {
           provide: PrismaService,
           useValue: prisma,
         },
+        {
+          provide: InventoryService,
+          useValue: inventoryService,
+        },
       ],
     }).compile();
 
@@ -65,21 +84,24 @@ describe('CartService', () => {
   });
 
   it('adds item to cart when stock is available', async () => {
-    prisma.inventory.findFirst.mockResolvedValue({ id: 'inv-1', storeId: 'store-1' });
+    inventoryService.getCartInventoryRecord.mockResolvedValue({
+      id: 'inv-1',
+      storeId: 'store-1',
+    });
     prisma.cart.findUnique
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
         id: 'cart-1',
         store: { id: 'store-1', name: 'Main', city: 'Lahore', country: 'PK' },
         items: [],
-      });
+    });
     prisma.cart.create.mockResolvedValue({ id: 'cart-1', userId: 'u1', storeId: 'store-1' });
     prisma.cartItem.findUnique.mockResolvedValue(null);
-    prisma.$executeRaw.mockResolvedValue(1);
+    inventoryService.reserveStock.mockResolvedValue(undefined);
 
     await service.addItem('u1', { inventoryId: 'inv-1', quantity: 2 });
 
-    expect(prisma.$executeRaw).toHaveBeenCalled();
+    expect(inventoryService.reserveStock).toHaveBeenCalledWith(prisma, 'inv-1', 2);
     expect(prisma.cartItem.create).toHaveBeenCalledWith({
       data: { cartId: 'cart-1', inventoryId: 'inv-1', quantity: 2 },
     });
@@ -119,7 +141,10 @@ describe('CartService', () => {
   });
 
   it('throws when adding item from another store', async () => {
-    prisma.inventory.findFirst.mockResolvedValue({ id: 'inv-1', storeId: 'store-2' });
+    inventoryService.getCartInventoryRecord.mockResolvedValue({
+      id: 'inv-1',
+      storeId: 'store-2',
+    });
     prisma.cart.findUnique.mockResolvedValue({ id: 'cart-1', userId: 'u1', storeId: 'store-1' });
 
     await expect(
@@ -128,16 +153,21 @@ describe('CartService', () => {
   });
 
   it('throws when stock reservation fails while adding', async () => {
-    prisma.inventory.findFirst.mockResolvedValue({ id: 'inv-1', storeId: 'store-1' });
+    inventoryService.getCartInventoryRecord.mockResolvedValue({
+      id: 'inv-1',
+      storeId: 'store-1',
+    });
     prisma.cart.findUnique
       .mockResolvedValueOnce({ id: 'cart-1', userId: 'u1', storeId: 'store-1' })
       .mockResolvedValueOnce({
         id: 'cart-1',
         store: { id: 'store-1', name: 'Main', city: 'Lahore', country: 'PK' },
         items: [],
-      });
+    });
     prisma.cartItem.findUnique.mockResolvedValue(null);
-    prisma.$executeRaw.mockResolvedValue(0);
+    inventoryService.reserveStock.mockRejectedValue(
+      new BadRequestException('Requested quantity is out of stock'),
+    );
 
     await expect(
       service.addItem('u1', { inventoryId: 'inv-1', quantity: 10 }),
@@ -151,13 +181,13 @@ describe('CartService', () => {
         id: 'cart-1',
         store: { id: 'store-1', name: 'Main', city: 'Lahore', country: 'PK' },
         items: [],
-      });
+    });
     prisma.cartItem.findUnique.mockResolvedValue({ id: 'item-1', quantity: 1, inventoryId: 'inv-1' });
-    prisma.$executeRaw.mockResolvedValue(1);
+    inventoryService.reserveStock.mockResolvedValue(undefined);
 
     await service.updateItem('u1', { inventoryId: 'inv-1', quantity: 4 });
 
-    expect(prisma.$executeRaw).toHaveBeenCalled();
+    expect(inventoryService.reserveStock).toHaveBeenCalledWith(prisma, 'inv-1', 3);
     expect(prisma.cartItem.update).toHaveBeenCalledWith({
       where: { id: 'item-1' },
       data: { quantity: 4 },
@@ -169,12 +199,12 @@ describe('CartService', () => {
       .mockResolvedValueOnce({ id: 'cart-1', userId: 'u1', storeId: 'store-1' })
       .mockResolvedValueOnce(null);
     prisma.cartItem.findUnique.mockResolvedValue({ id: 'item-1', quantity: 2, inventoryId: 'inv-1' });
-    prisma.inventory.updateMany.mockResolvedValue({ count: 1 });
+    inventoryService.releaseStock.mockResolvedValue(undefined);
     prisma.cartItem.count.mockResolvedValue(0);
 
     await service.removeItem('u1', 'inv-1');
 
-    expect(prisma.inventory.updateMany).toHaveBeenCalled();
+    expect(inventoryService.releaseStock).toHaveBeenCalledWith(prisma, 'inv-1', 2);
     expect(prisma.cart.delete).toHaveBeenCalledWith({ where: { id: 'cart-1' } });
   });
 
@@ -185,17 +215,17 @@ describe('CartService', () => {
       storeId: 'store-1',
       items: [{ inventoryId: 'inv-1', quantity: 2 }],
     });
-    prisma.inventory.findMany.mockResolvedValue([
-      {
-        id: 'inv-1',
-        storeId: 'store-1',
-        variantId: 'var-1',
-        stockQty: 10,
-        reservedQty: 5,
-        storePrice: 300,
-        variant: { price: 280, product: { id: 'p1', name: 'Phone' } },
-      },
-    ]);
+    inventoryService.buildCheckoutQuote.mockResolvedValue({
+      total: 600,
+      items: [
+        {
+          inventoryId: 'inv-1',
+          variantId: 'var-1',
+          quantity: 2,
+          price: 300,
+        },
+      ],
+    });
     prisma.address.findFirst.mockResolvedValue({
       id: 'addr-1',
       name: 'John',
@@ -207,7 +237,7 @@ describe('CartService', () => {
       zip: '54000',
       country: 'PK',
     });
-    prisma.inventory.updateMany.mockResolvedValue({ count: 1 });
+    inventoryService.captureCheckoutStock.mockResolvedValue(undefined);
     prisma.order.create.mockResolvedValue({
       id: 'order-1',
       status: 'PENDING',
@@ -225,6 +255,12 @@ describe('CartService', () => {
 
     const result = await service.createOrder('u1', {});
 
+    expect(inventoryService.buildCheckoutQuote).toHaveBeenCalledWith(prisma, 'store-1', [
+      { inventoryId: 'inv-1', quantity: 2 },
+    ]);
+    expect(inventoryService.captureCheckoutStock).toHaveBeenCalledWith(prisma, [
+      { inventoryId: 'inv-1', quantity: 2 },
+    ]);
     expect(result.status).toBe('PENDING');
     expect(result.paymentMethod).toBe('COD');
     expect(prisma.cartItem.deleteMany).toHaveBeenCalledWith({ where: { cartId: 'cart-1' } });
@@ -243,17 +279,17 @@ describe('CartService', () => {
       storeId: 'store-1',
       items: [{ inventoryId: 'inv-1', quantity: 1 }],
     });
-    prisma.inventory.findMany.mockResolvedValue([
-      {
-        id: 'inv-1',
-        storeId: 'store-1',
-        variantId: 'var-1',
-        stockQty: 4,
-        reservedQty: 1,
-        storePrice: 200,
-        variant: { price: 180, product: { id: 'p1', name: 'Phone' } },
-      },
-    ]);
+    inventoryService.buildCheckoutQuote.mockResolvedValue({
+      total: 200,
+      items: [
+        {
+          inventoryId: 'inv-1',
+          variantId: 'var-1',
+          quantity: 1,
+          price: 200,
+        },
+      ],
+    });
     prisma.address.findFirst.mockResolvedValue(null);
 
     await expect(service.createOrder('u1', {})).rejects.toBeInstanceOf(BadRequestException);
