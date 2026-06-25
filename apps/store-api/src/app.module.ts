@@ -10,6 +10,7 @@ import { ProductModule } from './modules/product/product.module';
 import { PermissionModule } from './modules/permission/permission.module';
 import { RoleModule } from './modules/role/role.module';
 import { TaxClassModule } from './modules/tax-class/tax-class.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { TaxClassModule } from './modules/tax-class/tax-class.module';
     InventoryModule,
     PermissionModule,
     RoleModule,
+    UsersModule,
   ],
   controllers: [AppAuthController],
 })

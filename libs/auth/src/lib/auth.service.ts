@@ -9,6 +9,7 @@ import { Prisma, User } from '@prisma/client';
 import { PrismaService } from 'database';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
+import { AppRole } from 'models';
 import { LoginDto } from './dto/login.dto';
 import { CustomerSignupDto } from './dto/customer-signup.dto';
 import { VendorSignupDto } from './dto/vendor-signup.dto';
@@ -51,7 +52,11 @@ export class AuthService {
       },
     });
 
-    return this.buildAccessToken(user, null);
+    return this.buildAccessToken(
+      user,
+      null,
+      user.isSuperAdmin ? AppRole.ADMIN : AppRole.USER,
+    );
   }
 
   async signupVendor(dto: VendorSignupDto): Promise<{ access_token: string }> {
@@ -76,7 +81,7 @@ export class AuthService {
         },
       });
 
-      return this.buildAccessToken(user, null);
+      return this.buildAccessToken(user, null, AppRole.ADMIN);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -137,7 +142,7 @@ export class AuthService {
       return { user, tenantId: tenant.id };
     });
 
-    return this.buildAccessToken(result.user, result.tenantId);
+    return this.buildAccessToken(result.user, result.tenantId, AppRole.ADMIN);
   }
 
   async login(dto: LoginDto): Promise<{ access_token: string }> {
@@ -162,8 +167,15 @@ export class AuthService {
     }
 
     const tenantId = user.roles[0]?.tenantId ?? null;
-    console.log(user, user.roles[0], tenantId);
-    return this.buildAccessToken(user, tenantId);
+    const role = user.isSuperAdmin
+      ? AppRole.ADMIN
+      : user.roles[0]?.role?.isAdmin
+        ? AppRole.ADMIN
+        : user.roles[0]
+          ? AppRole.STORE
+          : AppRole.USER;
+
+    return this.buildAccessToken(user, tenantId, role);
   }
 
   async profile(
@@ -410,10 +422,12 @@ export class AuthService {
   private async buildAccessToken(
     user: User,
     tenantId: string | null,
+    role: AppRole,
   ): Promise<{ access_token: string }> {
     const payload = {
       sub: user.id,
       email: user.email,
+      role,
       tenantId,
       isSuperAdmin: user.isSuperAdmin,
     };
