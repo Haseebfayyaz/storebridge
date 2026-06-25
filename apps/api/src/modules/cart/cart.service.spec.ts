@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { OutboxService } from 'common';
 import { PrismaService } from 'database';
@@ -362,14 +362,6 @@ describe('CartService', () => {
 
     await expect(service.createOrder('u1', {})).rejects.toBeInstanceOf(
       BadRequestException,
-    );
-  });
-
-  it('throws not found when user requests another user order', async () => {
-    prisma.order.findFirst.mockResolvedValue(null);
-
-    await expect(service.getOrder('u1', 'order-1')).rejects.toBeInstanceOf(
-      NotFoundException,
     );
   });
 });

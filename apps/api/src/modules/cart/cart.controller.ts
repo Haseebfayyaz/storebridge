@@ -44,7 +44,10 @@ export class CartController {
   }
 
   @Delete('items/:inventoryId')
-  removeItem(@Req() req: RequestWithUser, @Param('inventoryId') inventoryId: string) {
+  removeItem(
+    @Req() req: RequestWithUser,
+    @Param('inventoryId') inventoryId: string,
+  ) {
     return this.cartService.removeItem(req.user.sub, inventoryId);
   }
 
@@ -56,15 +59,5 @@ export class CartController {
   @Post('checkout')
   createOrder(@Req() req: RequestWithUser, @Body() dto: CreateOrderDto) {
     return this.cartService.createOrder(req.user.sub, dto);
-  }
-
-  @Get('orders')
-  getOrders(@Req() req: RequestWithUser) {
-    return this.cartService.getOrders(req.user.sub);
-  }
-
-  @Get('orders/:orderId')
-  getOrder(@Req() req: RequestWithUser, @Param('orderId') orderId: string) {
-    return this.cartService.getOrder(req.user.sub, orderId);
   }
 }
