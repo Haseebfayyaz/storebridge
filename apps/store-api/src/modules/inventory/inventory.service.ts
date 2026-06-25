@@ -8,7 +8,12 @@ import {
 import { Inventory, Prisma } from '@prisma/client';
 import { PrismaService } from 'database';
 import { ElasticsearchService } from '../elasticsearch/elasticsearch.service';
-import { ProductService, VariantProductContext } from '../product/product.service';
+import { INVENTORY_EVENT_TYPES } from '../events/event-catalog';
+import { OutboxService } from '../events/outbox.service';
+import {
+  ProductService,
+  VariantProductContext,
+} from '../product/product.service';
 import { CreateInventoryDto } from './dto/create-inventory.dto';
 import { ListInventoryQueryDto } from './dto/list-inventory-query.dto';
 import { UpdateInventoryDto } from './dto/update-inventory.dto';
@@ -71,6 +76,7 @@ export class InventoryService {
     private readonly prisma: PrismaService,
     private readonly elasticService: ElasticsearchService,
     private readonly productService: ProductService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   async createInventory(
@@ -85,65 +91,69 @@ export class InventoryService {
       actorTenantId,
     );
 
-    const existing = await this.prisma.inventory.findUnique({
-      where: {
-        storeId_variantId: {
-          storeId: dto.storeId,
-          variantId: dto.variantId,
-        },
-      },
-    });
-
     const stockQty = dto.stockQty ?? 0;
     const reservedQty = dto.reservedQty ?? 0;
     if (reservedQty > stockQty) {
-      throw new ConflictException('reservedQty cannot be greater than stockQty');
-    }
-
-    let inventory: Inventory;
-    if (existing && !existing.isDeleted) {
       throw new ConflictException(
-        'Inventory already exists for this store and variant',
+        'reservedQty cannot be greater than stockQty',
       );
     }
 
-    if (existing?.isDeleted) {
-      inventory = await this.prisma.inventory.update({
-        where: { id: existing.id },
-        data: {
-          isDeleted: false,
-          stockQty,
-          reservedQty,
-          lowStock: dto.lowStock ?? existing.lowStock,
-          storePrice: dto.storePrice,
-          storeCostPrice: dto.storeCostPrice,
-          storeMrp: dto.storeMrp,
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.inventory.findUnique({
+        where: {
+          storeId_variantId: {
+            storeId: dto.storeId,
+            variantId: dto.variantId,
+          },
         },
       });
-    } else {
-      inventory = await this.prisma.inventory.create({
-        data: {
-          storeId: dto.storeId,
-          variantId: dto.variantId,
-          stockQty,
-          reservedQty,
-          lowStock: dto.lowStock ?? 5,
-          storePrice: dto.storePrice,
-          storeCostPrice: dto.storeCostPrice,
-          storeMrp: dto.storeMrp,
-        },
-      });
-    }
 
-    await this.logChange({
-      inventory,
-      action: InventoryAction.CREATE,
-      previousStock: existing?.stockQty ?? 0,
-      newStock: inventory.stockQty,
-      changedBy,
+      let inventory: Inventory;
+      if (existing && !existing.isDeleted) {
+        throw new ConflictException(
+          'Inventory already exists for this store and variant',
+        );
+      }
+
+      if (existing?.isDeleted) {
+        inventory = await tx.inventory.update({
+          where: { id: existing.id },
+          data: {
+            isDeleted: false,
+            stockQty,
+            reservedQty,
+            lowStock: dto.lowStock ?? existing.lowStock,
+            storePrice: dto.storePrice,
+            storeCostPrice: dto.storeCostPrice,
+            storeMrp: dto.storeMrp,
+          },
+        });
+      } else {
+        inventory = await tx.inventory.create({
+          data: {
+            storeId: dto.storeId,
+            variantId: dto.variantId,
+            stockQty,
+            reservedQty,
+            lowStock: dto.lowStock ?? 5,
+            storePrice: dto.storePrice,
+            storeCostPrice: dto.storeCostPrice,
+            storeMrp: dto.storeMrp,
+          },
+        });
+      }
+
+      await this.recordInventoryChange(tx, {
+        inventory,
+        action: InventoryAction.CREATE,
+        previousStock: existing?.stockQty ?? 0,
+        newStock: inventory.stockQty,
+        changedBy,
+      });
+
+      return inventory;
     });
-
-    return inventory;
   }
 
   async findOne(id: string): Promise<Inventory> {
@@ -224,7 +234,8 @@ export class InventoryService {
         ? Prisma.sql`COALESCE(i."storePrice", pv."price")`
         : Prisma.sql`p."createdAt"`;
 
-    const sortOrderSql = sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+    const sortOrderSql =
+      sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
 
     const filters: Prisma.Sql[] = [
       Prisma.sql`i."isDeleted" = false`,
@@ -377,57 +388,70 @@ export class InventoryService {
     dto: UpdateInventoryDto,
     changedBy?: string,
   ): Promise<Inventory> {
-    const current = await this.findOne(id);
+    return this.prisma.$transaction(async (tx) => {
+      const current = await this.findOneInTx(tx, id);
 
-    const targetStockQty = dto.stockQty ?? current.stockQty;
-    const targetReservedQty = dto.reservedQty ?? current.reservedQty;
+      const targetStockQty = dto.stockQty ?? current.stockQty;
+      const targetReservedQty = dto.reservedQty ?? current.reservedQty;
 
-    if (targetReservedQty > targetStockQty) {
-      throw new ConflictException('reservedQty cannot be greater than stockQty');
-    }
+      if (targetReservedQty > targetStockQty) {
+        throw new ConflictException(
+          'reservedQty cannot be greater than stockQty',
+        );
+      }
 
-    const updated = await this.prisma.inventory.update({
-      where: { id },
-      data: {
-        ...(dto.stockQty !== undefined ? { stockQty: dto.stockQty } : {}),
-        ...(dto.reservedQty !== undefined ? { reservedQty: dto.reservedQty } : {}),
-        ...(dto.lowStock !== undefined ? { lowStock: dto.lowStock } : {}),
-        ...(dto.storePrice !== undefined ? { storePrice: dto.storePrice } : {}),
-        ...(dto.storeCostPrice !== undefined
-          ? { storeCostPrice: dto.storeCostPrice }
-          : {}),
-        ...(dto.storeMrp !== undefined ? { storeMrp: dto.storeMrp } : {}),
-      },
+      const updated = await tx.inventory.update({
+        where: { id },
+        data: {
+          ...(dto.stockQty !== undefined ? { stockQty: dto.stockQty } : {}),
+          ...(dto.reservedQty !== undefined
+            ? { reservedQty: dto.reservedQty }
+            : {}),
+          ...(dto.lowStock !== undefined ? { lowStock: dto.lowStock } : {}),
+          ...(dto.storePrice !== undefined
+            ? { storePrice: dto.storePrice }
+            : {}),
+          ...(dto.storeCostPrice !== undefined
+            ? { storeCostPrice: dto.storeCostPrice }
+            : {}),
+          ...(dto.storeMrp !== undefined ? { storeMrp: dto.storeMrp } : {}),
+        },
+      });
+
+      await this.recordInventoryChange(tx, {
+        inventory: updated,
+        action: InventoryAction.UPDATE,
+        previousStock: current.stockQty,
+        newStock: updated.stockQty,
+        changedBy,
+      });
+
+      return updated;
     });
-
-    await this.logChange({
-      inventory: updated,
-      action: InventoryAction.UPDATE,
-      previousStock: current.stockQty,
-      newStock: updated.stockQty,
-      changedBy,
-    });
-
-    return updated;
   }
 
-  async softDeleteInventory(id: string, changedBy?: string): Promise<Inventory> {
-    const current = await this.findOne(id);
+  async softDeleteInventory(
+    id: string,
+    changedBy?: string,
+  ): Promise<Inventory> {
+    return this.prisma.$transaction(async (tx) => {
+      const current = await this.findOneInTx(tx, id);
 
-    const deleted = await this.prisma.inventory.update({
-      where: { id },
-      data: { isDeleted: true },
+      const deleted = await tx.inventory.update({
+        where: { id },
+        data: { isDeleted: true },
+      });
+
+      await this.recordInventoryChange(tx, {
+        inventory: deleted,
+        action: InventoryAction.DELETE,
+        previousStock: current.stockQty,
+        newStock: deleted.stockQty,
+        changedBy,
+      });
+
+      return deleted;
     });
-
-    await this.logChange({
-      inventory: deleted,
-      action: InventoryAction.DELETE,
-      previousStock: current.stockQty,
-      newStock: deleted.stockQty,
-      changedBy,
-    });
-
-    return deleted;
   }
 
   async reserveStock(
@@ -439,21 +463,20 @@ export class InventoryService {
       throw new ConflictException('quantity must be greater than 0');
     }
 
-    const mutation = await this.prisma.$transaction(async (tx) =>
-      this.reserveStockAtomic(tx, inventoryId, quantity),
-    );
+    return this.prisma.$transaction(async (tx) => {
+      const mutation = await this.reserveStockAtomic(tx, inventoryId, quantity);
+      const updated = await this.findOneInTx(tx, mutation.id);
 
-    const updated = await this.findOne(mutation.id);
+      await this.recordInventoryChange(tx, {
+        inventory: updated,
+        action: InventoryAction.RESERVE,
+        previousStock: mutation.previousStock,
+        newStock: mutation.newStock,
+        changedBy,
+      });
 
-    await this.logChange({
-      inventory: updated,
-      action: InventoryAction.RESERVE,
-      previousStock: mutation.previousStock,
-      newStock: mutation.newStock,
-      changedBy,
+      return updated;
     });
-
-    return updated;
   }
 
   async releaseReservedStock(
@@ -465,21 +488,20 @@ export class InventoryService {
       throw new ConflictException('quantity must be greater than 0');
     }
 
-    const mutation = await this.prisma.$transaction(async (tx) =>
-      this.releaseStockAtomic(tx, inventoryId, quantity),
-    );
+    return this.prisma.$transaction(async (tx) => {
+      const mutation = await this.releaseStockAtomic(tx, inventoryId, quantity);
+      const updated = await this.findOneInTx(tx, mutation.id);
 
-    const updated = await this.findOne(mutation.id);
+      await this.recordInventoryChange(tx, {
+        inventory: updated,
+        action: InventoryAction.RELEASE,
+        previousStock: mutation.previousStock,
+        newStock: mutation.newStock,
+        changedBy,
+      });
 
-    await this.logChange({
-      inventory: updated,
-      action: InventoryAction.RELEASE,
-      previousStock: mutation.previousStock,
-      newStock: mutation.newStock,
-      changedBy,
+      return updated;
     });
-
-    return updated;
   }
 
   async deductStock(params: {
@@ -503,21 +525,28 @@ export class InventoryService {
         params.quantity,
       );
 
-    const mutation = params.tx
-      ? await execDeduction(params.tx)
-      : await this.prisma.$transaction(execDeduction);
+    const executeWithLogging = async (
+      tx: Prisma.TransactionClient,
+    ): Promise<Inventory> => {
+      const mutation = await execDeduction(tx);
+      const updated = await this.findOneInTx(tx, mutation.id);
 
-    const updated = await this.findOne(mutation.id);
+      await this.recordInventoryChange(tx, {
+        inventory: updated,
+        action: InventoryAction.DEDUCT,
+        previousStock: mutation.previousStock,
+        newStock: mutation.newStock,
+        changedBy: params.changedBy,
+      });
 
-    await this.logChange({
-      inventory: updated,
-      action: InventoryAction.DEDUCT,
-      previousStock: mutation.previousStock,
-      newStock: mutation.newStock,
-      changedBy: params.changedBy,
-    });
+      return updated;
+    };
 
-    return updated;
+    if (params.tx) {
+      return executeWithLogging(params.tx);
+    }
+
+    return this.prisma.$transaction((tx) => executeWithLogging(tx));
   }
 
   async deductStockForOrderItems(params: {
@@ -530,7 +559,9 @@ export class InventoryService {
       a.variantId.localeCompare(b.variantId),
     );
 
-    const execute = async (tx: Prisma.TransactionClient): Promise<Inventory[]> => {
+    const execute = async (
+      tx: Prisma.TransactionClient,
+    ): Promise<Inventory[]> => {
       const updates: Inventory[] = [];
 
       for (const item of sortedItems) {
@@ -667,7 +698,9 @@ export class InventoryService {
     });
 
     if (!inventory || inventory.isDeleted) {
-      throw new NotFoundException(`Inventory with id "${inventoryId}" not found`);
+      throw new NotFoundException(
+        `Inventory with id "${inventoryId}" not found`,
+      );
     }
   }
 
@@ -714,7 +747,6 @@ export class InventoryService {
         'Cross-tenant inventory operation is not allowed',
       );
     }
-
   }
 
   private mapInventoryWithPricing(inventory: {
@@ -760,7 +792,10 @@ export class InventoryService {
     };
   }
 
-  private decodeCursor(cursor: string, sortBy: 'price' | 'date'): InventoryCursor {
+  private decodeCursor(
+    cursor: string,
+    sortBy: 'price' | 'date',
+  ): InventoryCursor {
     try {
       const decoded = Buffer.from(cursor, 'base64').toString('utf8');
       const parsed = JSON.parse(decoded) as InventoryCursor;
@@ -783,33 +818,79 @@ export class InventoryService {
     return Buffer.from(JSON.stringify(cursor)).toString('base64');
   }
 
-  private async logChange(params: {
-    inventory: Inventory;
-    action: InventoryAction;
-    previousStock: number;
-    newStock: number;
-    changedBy?: string;
-  }): Promise<void> {
-    try {
-      const context = await this.resolveLogContext(params.inventory.variantId);
+  private async findOneInTx(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<Inventory> {
+    const inventory = await tx.inventory.findUnique({ where: { id } });
 
-      await this.elasticService.logInventoryChange({
-        inventoryId: params.inventory.id,
-        tenantId: context.tenantId,
-        storeId: params.inventory.storeId,
-        productId: context.productId,
-        variantId: params.inventory.variantId,
-        action: params.action,
-        previousStock: params.previousStock,
-        newStock: params.newStock,
-        changedBy: params.changedBy,
-        timestamp: new Date().toISOString(),
-      });
+    if (!inventory || inventory.isDeleted) {
+      throw new NotFoundException(`Inventory with id "${id}" not found`);
+    }
+
+    return inventory;
+  }
+
+  private async recordInventoryChange(
+    tx: Prisma.TransactionClient,
+    params: {
+      inventory: Inventory;
+      action: InventoryAction;
+      previousStock: number;
+      newStock: number;
+      changedBy?: string;
+    },
+  ): Promise<void> {
+    const context = await this.resolveLogContext(params.inventory.variantId);
+    const payload = {
+      inventoryId: params.inventory.id,
+      tenantId: context.tenantId,
+      storeId: params.inventory.storeId,
+      productId: context.productId,
+      variantId: params.inventory.variantId,
+      action: params.action,
+      previousStock: params.previousStock,
+      newStock: params.newStock,
+      changedBy: params.changedBy,
+      timestamp: new Date().toISOString(),
+    };
+
+    await this.outboxService.enqueue(tx, {
+      eventType: this.mapInventoryEventType(params.action),
+      aggregateType: 'Inventory',
+      aggregateId: params.inventory.id,
+      tenantId: context.tenantId,
+      storeId: params.inventory.storeId,
+      actorId: params.changedBy ?? null,
+      payload,
+    });
+
+    try {
+      await this.elasticService.logInventoryChange(payload);
     } catch (error) {
       this.logger.error(
         `Failed to prepare inventory log for inventoryId=${params.inventory.id}`,
         error instanceof Error ? error.stack : undefined,
       );
+    }
+  }
+
+  private mapInventoryEventType(action: InventoryAction) {
+    switch (action) {
+      case InventoryAction.CREATE:
+        return INVENTORY_EVENT_TYPES.CREATED;
+      case InventoryAction.UPDATE:
+        return INVENTORY_EVENT_TYPES.UPDATED;
+      case InventoryAction.DELETE:
+        return INVENTORY_EVENT_TYPES.DELETED;
+      case InventoryAction.RESERVE:
+        return INVENTORY_EVENT_TYPES.RESERVED;
+      case InventoryAction.RELEASE:
+        return INVENTORY_EVENT_TYPES.RELEASED;
+      case InventoryAction.DEDUCT:
+        return INVENTORY_EVENT_TYPES.CAPTURED;
+      default:
+        return INVENTORY_EVENT_TYPES.UPDATED;
     }
   }
 
