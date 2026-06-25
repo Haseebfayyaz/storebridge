@@ -6,10 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Inventory, Prisma } from '@prisma/client';
+import { INVENTORY_EVENT_TYPES, OutboxService } from 'common';
 import { PrismaService } from 'database';
 import { ElasticsearchService } from '../elasticsearch/elasticsearch.service';
-import { INVENTORY_EVENT_TYPES } from '../events/event-catalog';
-import { OutboxService } from '../events/outbox.service';
 import {
   ProductService,
   VariantProductContext,

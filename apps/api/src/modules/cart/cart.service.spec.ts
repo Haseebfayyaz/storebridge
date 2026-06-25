@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { OutboxService } from 'common';
 import { PrismaService } from 'database';
 import { CartService } from './cart.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -21,6 +22,9 @@ describe('CartService', () => {
     releaseStock: jest.Mock;
     buildCheckoutQuote: jest.Mock;
     captureCheckoutStock: jest.Mock;
+  };
+  let outboxService: {
+    enqueue: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -63,8 +67,13 @@ describe('CartService', () => {
       buildCheckoutQuote: jest.fn(),
       captureCheckoutStock: jest.fn(),
     };
+    outboxService = {
+      enqueue: jest.fn().mockResolvedValue(undefined),
+    };
 
-    prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
+    prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
+      cb(prisma),
+    );
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -77,6 +86,10 @@ describe('CartService', () => {
           provide: InventoryService,
           useValue: inventoryService,
         },
+        {
+          provide: OutboxService,
+          useValue: outboxService,
+        },
       ],
     }).compile();
 
@@ -88,20 +101,26 @@ describe('CartService', () => {
       id: 'inv-1',
       storeId: 'store-1',
     });
-    prisma.cart.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: 'cart-1',
-        store: { id: 'store-1', name: 'Main', city: 'Lahore', country: 'PK' },
-        items: [],
+    prisma.cart.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 'cart-1',
+      store: { id: 'store-1', name: 'Main', city: 'Lahore', country: 'PK' },
+      items: [],
     });
-    prisma.cart.create.mockResolvedValue({ id: 'cart-1', userId: 'u1', storeId: 'store-1' });
+    prisma.cart.create.mockResolvedValue({
+      id: 'cart-1',
+      userId: 'u1',
+      storeId: 'store-1',
+    });
     prisma.cartItem.findUnique.mockResolvedValue(null);
     inventoryService.reserveStock.mockResolvedValue(undefined);
 
     await service.addItem('u1', { inventoryId: 'inv-1', quantity: 2 });
 
-    expect(inventoryService.reserveStock).toHaveBeenCalledWith(prisma, 'inv-1', 2);
+    expect(inventoryService.reserveStock).toHaveBeenCalledWith(
+      prisma,
+      'inv-1',
+      2,
+    );
     expect(prisma.cartItem.create).toHaveBeenCalledWith({
       data: { cartId: 'cart-1', inventoryId: 'inv-1', quantity: 2 },
     });
@@ -110,7 +129,12 @@ describe('CartService', () => {
   it('returns a cart snapshot with totals and line items', async () => {
     prisma.cart.findUnique.mockResolvedValue({
       id: 'cart-1',
-      store: { id: 'store-1', name: 'Main Store', city: 'Lahore', country: 'PK' },
+      store: {
+        id: 'store-1',
+        name: 'Main Store',
+        city: 'Lahore',
+        country: 'PK',
+      },
       items: [
         {
           inventoryId: 'inv-1',
@@ -145,7 +169,11 @@ describe('CartService', () => {
       id: 'inv-1',
       storeId: 'store-2',
     });
-    prisma.cart.findUnique.mockResolvedValue({ id: 'cart-1', userId: 'u1', storeId: 'store-1' });
+    prisma.cart.findUnique.mockResolvedValue({
+      id: 'cart-1',
+      userId: 'u1',
+      storeId: 'store-1',
+    });
 
     await expect(
       service.addItem('u1', { inventoryId: 'inv-1', quantity: 1 }),
@@ -163,7 +191,7 @@ describe('CartService', () => {
         id: 'cart-1',
         store: { id: 'store-1', name: 'Main', city: 'Lahore', country: 'PK' },
         items: [],
-    });
+      });
     prisma.cartItem.findUnique.mockResolvedValue(null);
     inventoryService.reserveStock.mockRejectedValue(
       new BadRequestException('Requested quantity is out of stock'),
@@ -181,13 +209,21 @@ describe('CartService', () => {
         id: 'cart-1',
         store: { id: 'store-1', name: 'Main', city: 'Lahore', country: 'PK' },
         items: [],
+      });
+    prisma.cartItem.findUnique.mockResolvedValue({
+      id: 'item-1',
+      quantity: 1,
+      inventoryId: 'inv-1',
     });
-    prisma.cartItem.findUnique.mockResolvedValue({ id: 'item-1', quantity: 1, inventoryId: 'inv-1' });
     inventoryService.reserveStock.mockResolvedValue(undefined);
 
     await service.updateItem('u1', { inventoryId: 'inv-1', quantity: 4 });
 
-    expect(inventoryService.reserveStock).toHaveBeenCalledWith(prisma, 'inv-1', 3);
+    expect(inventoryService.reserveStock).toHaveBeenCalledWith(
+      prisma,
+      'inv-1',
+      3,
+    );
     expect(prisma.cartItem.update).toHaveBeenCalledWith({
       where: { id: 'item-1' },
       data: { quantity: 4 },
@@ -198,14 +234,24 @@ describe('CartService', () => {
     prisma.cart.findUnique
       .mockResolvedValueOnce({ id: 'cart-1', userId: 'u1', storeId: 'store-1' })
       .mockResolvedValueOnce(null);
-    prisma.cartItem.findUnique.mockResolvedValue({ id: 'item-1', quantity: 2, inventoryId: 'inv-1' });
+    prisma.cartItem.findUnique.mockResolvedValue({
+      id: 'item-1',
+      quantity: 2,
+      inventoryId: 'inv-1',
+    });
     inventoryService.releaseStock.mockResolvedValue(undefined);
     prisma.cartItem.count.mockResolvedValue(0);
 
     await service.removeItem('u1', 'inv-1');
 
-    expect(inventoryService.releaseStock).toHaveBeenCalledWith(prisma, 'inv-1', 2);
-    expect(prisma.cart.delete).toHaveBeenCalledWith({ where: { id: 'cart-1' } });
+    expect(inventoryService.releaseStock).toHaveBeenCalledWith(
+      prisma,
+      'inv-1',
+      2,
+    );
+    expect(prisma.cart.delete).toHaveBeenCalledWith({
+      where: { id: 'cart-1' },
+    });
   });
 
   it('creates order in pending status with COD and clears cart', async () => {
@@ -255,21 +301,43 @@ describe('CartService', () => {
 
     const result = await service.createOrder('u1', {});
 
-    expect(inventoryService.buildCheckoutQuote).toHaveBeenCalledWith(prisma, 'store-1', [
-      { inventoryId: 'inv-1', quantity: 2 },
-    ]);
+    expect(inventoryService.buildCheckoutQuote).toHaveBeenCalledWith(
+      prisma,
+      'store-1',
+      [{ inventoryId: 'inv-1', quantity: 2 }],
+    );
     expect(inventoryService.captureCheckoutStock).toHaveBeenCalledWith(prisma, [
       { inventoryId: 'inv-1', quantity: 2 },
     ]);
     expect(result.status).toBe('PENDING');
     expect(result.paymentMethod).toBe('COD');
-    expect(prisma.cartItem.deleteMany).toHaveBeenCalledWith({ where: { cartId: 'cart-1' } });
+    expect(prisma.cartItem.deleteMany).toHaveBeenCalledWith({
+      where: { cartId: 'cart-1' },
+    });
+    expect(outboxService.enqueue).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        eventType: 'checkout.completed',
+        aggregateType: 'Checkout',
+        aggregateId: 'order-1',
+      }),
+    );
+    expect(outboxService.enqueue).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        eventType: 'order.placed',
+        aggregateType: 'Order',
+        aggregateId: 'order-1',
+      }),
+    );
   });
 
   it('fails checkout when cart is empty', async () => {
     prisma.cart.findUnique.mockResolvedValue(null);
 
-    await expect(service.createOrder('u1', {})).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.createOrder('u1', {})).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('fails checkout when address details are missing', async () => {
@@ -292,12 +360,16 @@ describe('CartService', () => {
     });
     prisma.address.findFirst.mockResolvedValue(null);
 
-    await expect(service.createOrder('u1', {})).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.createOrder('u1', {})).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('throws not found when user requests another user order', async () => {
     prisma.order.findFirst.mockResolvedValue(null);
 
-    await expect(service.getOrder('u1', 'order-1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.getOrder('u1', 'order-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

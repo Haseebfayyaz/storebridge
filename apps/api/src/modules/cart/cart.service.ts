@@ -4,6 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaymentMethod, Prisma } from '@prisma/client';
+import {
+  CART_EVENT_TYPES,
+  CHECKOUT_EVENT_TYPES,
+  ORDER_EVENT_TYPES,
+  OutboxService,
+} from 'common';
 import { PrismaService } from 'database';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -16,6 +22,7 @@ export class CartService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   async getCart(userId: string) {
@@ -29,7 +36,9 @@ export class CartService {
               include: {
                 variant: {
                   include: {
-                    product: { select: { id: true, name: true, description: true } },
+                    product: {
+                      select: { id: true, name: true, description: true },
+                    },
                   },
                 },
               },
@@ -88,10 +97,16 @@ export class CartService {
       }
 
       const existing = await tx.cartItem.findUnique({
-        where: { cartId_inventoryId: { cartId: cart.id, inventoryId: dto.inventoryId } },
+        where: {
+          cartId_inventoryId: { cartId: cart.id, inventoryId: dto.inventoryId },
+        },
       });
 
-      await this.inventoryService.reserveStock(tx, dto.inventoryId, dto.quantity);
+      await this.inventoryService.reserveStock(
+        tx,
+        dto.inventoryId,
+        dto.quantity,
+      );
 
       if (existing) {
         await tx.cartItem.update({
@@ -100,9 +115,28 @@ export class CartService {
         });
       } else {
         await tx.cartItem.create({
-          data: { cartId: cart.id, inventoryId: dto.inventoryId, quantity: dto.quantity },
+          data: {
+            cartId: cart.id,
+            inventoryId: dto.inventoryId,
+            quantity: dto.quantity,
+          },
         });
       }
+
+      await this.recordCartEvent(tx, {
+        eventType: CART_EVENT_TYPES.ITEM_ADDED,
+        aggregateId: cart.id,
+        payload: {
+          cartId: cart.id,
+          userId,
+          storeId: cart.storeId,
+          inventoryId: dto.inventoryId,
+          quantity: dto.quantity,
+          newQuantity: existing
+            ? existing.quantity + dto.quantity
+            : dto.quantity,
+        },
+      });
 
       return this.getCartSnapshot(tx, userId);
     });
@@ -116,7 +150,9 @@ export class CartService {
       }
 
       const item = await tx.cartItem.findUnique({
-        where: { cartId_inventoryId: { cartId: cart.id, inventoryId: dto.inventoryId } },
+        where: {
+          cartId_inventoryId: { cartId: cart.id, inventoryId: dto.inventoryId },
+        },
       });
       if (!item) {
         throw new NotFoundException('Cart item not found');
@@ -126,12 +162,30 @@ export class CartService {
       if (delta > 0) {
         await this.inventoryService.reserveStock(tx, dto.inventoryId, delta);
       } else if (delta < 0) {
-        await this.inventoryService.releaseStock(tx, dto.inventoryId, Math.abs(delta));
+        await this.inventoryService.releaseStock(
+          tx,
+          dto.inventoryId,
+          Math.abs(delta),
+        );
       }
 
       await tx.cartItem.update({
         where: { id: item.id },
         data: { quantity: dto.quantity },
+      });
+
+      await this.recordCartEvent(tx, {
+        eventType: CART_EVENT_TYPES.ITEM_UPDATED,
+        aggregateId: cart.id,
+        payload: {
+          cartId: cart.id,
+          userId,
+          storeId: cart.storeId,
+          inventoryId: dto.inventoryId,
+          previousQuantity: item.quantity,
+          quantity: dto.quantity,
+          delta,
+        },
       });
 
       return this.getCartSnapshot(tx, userId);
@@ -156,9 +210,38 @@ export class CartService {
 
       await tx.cartItem.delete({ where: { id: item.id } });
 
-      const remainingCount = await tx.cartItem.count({ where: { cartId: cart.id } });
+      const remainingCount = await tx.cartItem.count({
+        where: { cartId: cart.id },
+      });
       if (remainingCount === 0) {
         await tx.cart.delete({ where: { id: cart.id } });
+      }
+
+      await this.recordCartEvent(tx, {
+        eventType: CART_EVENT_TYPES.ITEM_REMOVED,
+        aggregateId: cart.id,
+        payload: {
+          cartId: cart.id,
+          userId,
+          storeId: cart.storeId,
+          inventoryId,
+          quantity: item.quantity,
+          cartDeleted: remainingCount === 0,
+        },
+      });
+
+      if (remainingCount === 0) {
+        await this.recordCartEvent(tx, {
+          eventType: CART_EVENT_TYPES.CLEARED,
+          aggregateId: cart.id,
+          payload: {
+            cartId: cart.id,
+            userId,
+            storeId: cart.storeId,
+            itemCount: 0,
+            reason: 'removed-last-item',
+          },
+        });
       }
 
       return this.getCartSnapshot(tx, userId);
@@ -222,6 +305,47 @@ export class CartService {
       });
 
       await this.clearCart(tx, cart.id);
+      await this.recordCheckoutEvent(tx, {
+        eventType: CHECKOUT_EVENT_TYPES.COMPLETED,
+        aggregateType: 'Checkout',
+        aggregateId: order.id,
+        payload: {
+          orderId: order.id,
+          cartId: cart.id,
+          userId,
+          storeId: cart.storeId,
+          total: checkoutQuote.total,
+          paymentMethod: order.paymentMethod,
+          itemCount: order.items.length,
+          shipping,
+        },
+      });
+      await this.recordCheckoutEvent(tx, {
+        eventType: ORDER_EVENT_TYPES.PLACED,
+        aggregateType: 'Order',
+        aggregateId: order.id,
+        payload: {
+          orderId: order.id,
+          cartId: cart.id,
+          userId,
+          storeId: cart.storeId,
+          total: checkoutQuote.total,
+          paymentMethod: order.paymentMethod,
+          itemCount: order.items.length,
+          shipping,
+        },
+      });
+      await this.recordCartEvent(tx, {
+        eventType: CART_EVENT_TYPES.CLEARED,
+        aggregateId: cart.id,
+        payload: {
+          cartId: cart.id,
+          userId,
+          storeId: cart.storeId,
+          itemCount: cart.items.length,
+          orderId: order.id,
+        },
+      });
 
       return this.mapOrderSummary(order);
     });
@@ -360,7 +484,10 @@ export class CartService {
     };
   }
 
-  private async getCartForCheckout(tx: Prisma.TransactionClient, userId: string) {
+  private async getCartForCheckout(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ) {
     const cart = await tx.cart.findUnique({
       where: { userId },
       include: { items: true },
@@ -380,7 +507,10 @@ export class CartService {
   ) {
     const addressFromDb = dto.addressId
       ? await tx.address.findFirst({ where: { id: dto.addressId, userId } })
-      : await tx.address.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } });
+      : await tx.address.findFirst({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+        });
 
     const shipping = {
       customerName: dto.name ?? addressFromDb?.name ?? null,
@@ -393,7 +523,11 @@ export class CartService {
       shippingCountry: dto.country ?? addressFromDb?.country ?? null,
     };
 
-    if (!shipping.customerName || !shipping.customerPhone || !shipping.shippingStreet) {
+    if (
+      !shipping.customerName ||
+      !shipping.customerPhone ||
+      !shipping.shippingStreet
+    ) {
       throw new BadRequestException(
         'Address and personal details are required to place order',
       );
@@ -405,6 +539,34 @@ export class CartService {
   private async clearCart(tx: Prisma.TransactionClient, cartId: string) {
     await tx.cartItem.deleteMany({ where: { cartId } });
     await tx.cart.delete({ where: { id: cartId } });
+  }
+
+  private recordCartEvent(
+    tx: Prisma.TransactionClient,
+    event: {
+      eventType: string;
+      aggregateId: string;
+      payload: Prisma.InputJsonValue;
+    },
+  ) {
+    return this.outboxService.enqueue(tx, {
+      eventType: event.eventType,
+      aggregateType: 'Cart',
+      aggregateId: event.aggregateId,
+      payload: event.payload,
+    });
+  }
+
+  private recordCheckoutEvent(
+    tx: Prisma.TransactionClient,
+    event: {
+      eventType: string;
+      aggregateType: string;
+      aggregateId: string;
+      payload: Prisma.InputJsonValue;
+    },
+  ) {
+    return this.outboxService.enqueue(tx, event);
   }
 
   private mapOrderSummary(order: {
