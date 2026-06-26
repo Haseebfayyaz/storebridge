@@ -8,6 +8,7 @@ import { CategoryModule } from './modules/category/category.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProductModule } from './modules/product/product.module';
 import { PermissionModule } from './modules/permission/permission.module';
+import { OrdersModule } from './modules/orders/orders.module';
 import { RoleModule } from './modules/role/role.module';
 import { TaxClassModule } from './modules/tax-class/tax-class.module';
 import { UsersModule } from './modules/users/users.module';
@@ -24,6 +25,7 @@ import { UsersModule } from './modules/users/users.module';
     InventoryModule,
     PermissionModule,
     RoleModule,
+    OrdersModule,
     UsersModule,
   ],
   controllers: [AppAuthController],

@@ -23,6 +23,13 @@ export const CHECKOUT_EVENT_TYPES = {
 export const ORDER_EVENT_TYPES = {
   PLACED: 'order.placed',
   CANCELLED: 'order.cancelled',
+  STATUS_CHANGED: 'order.status.changed',
+} as const;
+
+export const PAYMENT_EVENT_TYPES = {
+  CAPTURED: 'payment.captured',
+  FAILED: 'payment.failed',
+  REFUNDED: 'payment.refunded',
 } as const;
 
 export type InventoryEventType =
@@ -36,3 +43,6 @@ export type CheckoutEventType =
 
 export type OrderEventType =
   (typeof ORDER_EVENT_TYPES)[keyof typeof ORDER_EVENT_TYPES];
+
+export type PaymentEventType =
+  (typeof PAYMENT_EVENT_TYPES)[keyof typeof PAYMENT_EVENT_TYPES];

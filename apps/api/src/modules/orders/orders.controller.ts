@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from 'auth';
 import { Request } from 'express';
 import { OrdersService } from './orders.service';
@@ -22,5 +22,10 @@ export class OrdersController {
   @Get(':orderId')
   getOrder(@Req() req: RequestWithUser, @Param('orderId') orderId: string) {
     return this.ordersService.getOrder(req.user.sub, orderId);
+  }
+
+  @Delete(':orderId')
+  cancelOrder(@Req() req: RequestWithUser, @Param('orderId') orderId: string) {
+    return this.ordersService.cancelOrder(req.user.sub, orderId);
   }
 }

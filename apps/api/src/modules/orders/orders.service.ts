@@ -1,10 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, PaymentMethod } from '@prisma/client';
+import { ORDER_EVENT_TYPES, OutboxService } from 'common';
 import { PrismaService } from 'database';
+import { InventoryService } from '../inventory/inventory.service';
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryService,
+    private readonly outboxService: OutboxService,
+  ) {}
 
   async getOrders(userId: string) {
     const orders = await this.prisma.order.findMany({
@@ -39,6 +49,81 @@ export class OrdersService {
     }
 
     return this.mapOrderDetail(order);
+  }
+
+  async cancelOrder(userId: string, orderId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: orderId, userId },
+        include: {
+          store: {
+            select: {
+              tenantId: true,
+            },
+          },
+          items: true,
+        },
+      });
+
+      if (!order) {
+        throw new NotFoundException('Order not found.');
+      }
+
+      if (order.status === 'CANCELLED') {
+        throw new BadRequestException('Order is already cancelled');
+      }
+
+      if (order.status === 'SHIPPED' || order.status === 'DELIVERED') {
+        throw new BadRequestException('Shipped orders cannot be cancelled');
+      }
+
+      if (order.isPaid) {
+        throw new BadRequestException(
+          'Paid orders must be refunded by the payments workflow',
+        );
+      }
+
+      await this.inventoryService.restoreOrderStock(
+        tx,
+        order.storeId,
+        order.items.map((item) => ({
+          variantId: item.variantId,
+          quantity: item.quantity,
+        })),
+      );
+
+      const cancelled = await tx.order.update({
+        where: { id: order.id },
+        data: { status: 'CANCELLED' },
+        include: {
+          items: {
+            include: {
+              variant: { include: { product: { select: { name: true } } } },
+            },
+          },
+        },
+      });
+
+      await this.outboxService.enqueue(tx, {
+        eventType: ORDER_EVENT_TYPES.CANCELLED,
+        aggregateType: 'Order',
+        aggregateId: cancelled.id,
+        tenantId: order.store.tenantId,
+        storeId: cancelled.storeId,
+        actorId: userId,
+        payload: {
+          orderId: cancelled.id,
+          userId,
+          storeId: cancelled.storeId,
+          status: cancelled.status,
+          isPaid: cancelled.isPaid,
+          total: cancelled.total,
+          cancelledAt: new Date().toISOString(),
+        },
+      });
+
+      return this.mapOrderDetail(cancelled);
+    });
   }
 
   private mapOrderListItem(order: {

@@ -21,6 +21,11 @@ export interface CheckoutCartItem {
   quantity: number;
 }
 
+export interface OrderRestockItem {
+  variantId: string;
+  quantity: number;
+}
+
 export interface CartInventoryRecord {
   id: string;
   storeId: string;
@@ -52,7 +57,8 @@ export class InventoryService {
         ? Prisma.sql`COALESCE(i."storePrice", pv."price")`
         : Prisma.sql`p."createdAt"`;
 
-    const sortOrderSql = sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+    const sortOrderSql =
+      sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
 
     const filters: Prisma.Sql[] = [
       Prisma.sql`i."isDeleted" = false`,
@@ -450,7 +456,10 @@ export class InventoryService {
         throw new BadRequestException('Cart contains invalid store items');
       }
 
-      if (inventory.reservedQty < item.quantity || inventory.stockQty < item.quantity) {
+      if (
+        inventory.reservedQty < item.quantity ||
+        inventory.stockQty < item.quantity
+      ) {
         throw new BadRequestException('Insufficient stock for checkout');
       }
 
@@ -508,6 +517,31 @@ export class InventoryService {
     }
   }
 
+  async restoreOrderStock(
+    tx: Prisma.TransactionClient,
+    storeId: string,
+    items: OrderRestockItem[],
+  ) {
+    for (const item of items) {
+      const stockUpdate = await tx.inventory.updateMany({
+        where: {
+          storeId,
+          variantId: item.variantId,
+          isDeleted: false,
+        },
+        data: {
+          stockQty: { increment: item.quantity },
+        },
+      });
+
+      if (stockUpdate.count === 0) {
+        throw new BadRequestException(
+          'Failed to restore stock for cancelled order',
+        );
+      }
+    }
+  }
+
   async reserveStock(
     tx: Prisma.TransactionClient,
     inventoryId: string,
@@ -541,7 +575,10 @@ export class InventoryService {
     }
   }
 
-  private decodeCursor(cursor: string, sortBy: 'price' | 'date'): InventoryCursor {
+  private decodeCursor(
+    cursor: string,
+    sortBy: 'price' | 'date',
+  ): InventoryCursor {
     try {
       const decoded = Buffer.from(cursor, 'base64').toString('utf8');
       const parsed = JSON.parse(decoded) as InventoryCursor;

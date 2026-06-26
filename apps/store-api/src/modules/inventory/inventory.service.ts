@@ -503,6 +503,64 @@ export class InventoryService {
     });
   }
 
+  async restoreOrderStock(
+    storeId: string,
+    items: Array<{ variantId: string; quantity: number }>,
+    changedBy?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<Inventory[]> {
+    const execute = async (
+      tx: Prisma.TransactionClient,
+    ): Promise<Inventory[]> => {
+      const updates: Inventory[] = [];
+
+      for (const item of items) {
+        const inventory = await tx.inventory.findUnique({
+          where: {
+            storeId_variantId: {
+              storeId,
+              variantId: item.variantId,
+            },
+          },
+        });
+
+        if (!inventory || inventory.isDeleted) {
+          throw new BadRequestException(
+            'Failed to restore stock for cancelled order',
+          );
+        }
+
+        const previousStock = inventory.stockQty;
+        const updated = await tx.inventory.update({
+          where: { id: inventory.id },
+          data: {
+            stockQty: {
+              increment: item.quantity,
+            },
+          },
+        });
+
+        await this.recordInventoryChange(tx, {
+          inventory: updated,
+          action: InventoryAction.UPDATE,
+          previousStock,
+          newStock: updated.stockQty,
+          changedBy,
+        });
+
+        updates.push(updated);
+      }
+
+      return updates;
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+
+    return this.prisma.$transaction((transaction) => execute(transaction));
+  }
+
   async deductStock(params: {
     storeId: string;
     variantId: string;

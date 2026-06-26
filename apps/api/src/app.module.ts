@@ -6,6 +6,7 @@ import { AppAuthController } from './modules/auth/auth.controller';
 import { CartModule } from './modules/cart/cart.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { OrdersModule } from './modules/orders/orders.module';
     InventoryModule,
     CartModule,
     OrdersModule,
+    PaymentsModule,
   ],
   controllers: [AppAuthController],
 })
