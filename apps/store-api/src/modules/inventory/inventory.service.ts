@@ -28,7 +28,7 @@ interface StockMutationResult {
   newStock: number;
 }
 
-interface InventoryListingRow {
+interface InventoryListing {
   inventoryId: string;
   storeId: string;
   variantId: string;
@@ -270,7 +270,7 @@ export class InventoryService {
 
     const whereClause = Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`;
 
-    const rows = await this.prisma.$queryRaw<InventoryListingRow[]>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<InventoryListing[]>(Prisma.sql`
       SELECT
         i."id" as "inventoryId",
         i."storeId",
@@ -395,7 +395,7 @@ export class InventoryService {
 
       if (targetReservedQty > targetStockQty) {
         throw new ConflictException(
-          'reservedQty cannot be greater than stockQty',
+          'reserved Qty cannot be greater than stockQty',
         );
       }
 
